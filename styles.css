@@ -9,6 +9,7 @@
   --primary: #f82888;
   --primary-dark: #c51a68;
   --accent: #ff6eb4;
+  --on-accent: #111111;
   --shadow: 0 10px 30px rgba(36, 19, 11, 0.09);
 }
 
@@ -81,17 +82,21 @@ img {
 .site-nav {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 
 .site-nav a {
+  flex: 0 0 auto;
   color: var(--muted);
   text-decoration: none;
+  font-size: 0.92rem;
   font-weight: 600;
   border: 1px solid rgba(240, 223, 212, 0.95);
   border-radius: 999px;
-  padding: 0.42rem 0.78rem;
+  padding: 0.34rem 0.58rem;
   background: rgba(255, 250, 246, 0.72);
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
@@ -146,7 +151,7 @@ section {
 
 .btn-primary {
   background: linear-gradient(135deg, var(--primary), var(--accent));
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .btn-secondary {
@@ -181,7 +186,7 @@ section {
 }
 
 .hero-logo-image {
-  width: clamp(250px, 44vw, 420px);
+  width: clamp(290px, 50vw, 500px);
 }
 
 .hero-kicker {
@@ -208,7 +213,48 @@ section {
   font-size: clamp(1.02rem, 2.2vw, 1.2rem);
   color: var(--muted);
   max-width: 700px;
-  margin: 0 auto 2rem;
+  margin: 0 auto 1.3rem;
+}
+
+.language-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 auto 1.4rem;
+  border: 1px solid rgba(248, 40, 136, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.35rem;
+  box-shadow: 0 10px 28px rgba(36, 19, 11, 0.08);
+}
+
+.language-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 0 0.45rem 0 0.65rem;
+  text-transform: uppercase;
+}
+
+.language-option {
+  color: var(--primary-dark);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.55rem 0.8rem;
+  text-decoration: none;
+}
+
+.language-option:hover,
+.language-option:focus-visible,
+.language-option.active {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+  color: #ffffff;
 }
 
 .hero-buttons {
@@ -502,12 +548,12 @@ section {
 /* Booking + contact + footer */
 .booking {
   background: linear-gradient(135deg, var(--primary), var(--accent));
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .booking .section-title,
 .booking .section-subtitle {
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .booking-content {
@@ -618,13 +664,15 @@ section {
   }
 
   .site-nav {
-    justify-content: center;
-    gap: 0.45rem;
-    font-size: 0.9rem;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    padding-bottom: 0.15rem;
   }
 
   .site-nav a {
-    padding: 0.34rem 0.62rem;
+    padding: 0.3rem 0.5rem;
   }
 
   .hero {
@@ -634,6 +682,11 @@ section {
 
   .hero-buttons .btn {
     width: 100%;
+  }
+
+  .language-toggle {
+    justify-content: center;
+    border-radius: 1rem;
   }
 
   .schedule-class-meta {
