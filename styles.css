@@ -264,6 +264,45 @@ section {
   gap: 0.8rem;
 }
 
+.hero-event {
+  max-width: 720px;
+  margin: 1.7rem auto 1.4rem;
+  padding: 1.15rem 1.4rem;
+  border: 2px solid var(--primary);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 34px rgba(197, 26, 104, 0.16);
+}
+
+.hero-event-kicker {
+  margin-bottom: 0.25rem;
+  color: var(--primary-dark);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero-event h2 {
+  margin-bottom: 0.35rem;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+  line-height: 1.2;
+}
+
+.hero-event p:not(.hero-event-kicker) {
+  color: var(--muted);
+}
+
+.hero-event-link {
+  display: inline-block;
+  margin-top: 0.55rem;
+  color: var(--primary-dark);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
 /* About + services */
 .about {
   background: var(--surface);
@@ -430,7 +469,7 @@ section {
 
 .events-content {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
   align-items: center;
   gap: 2rem;
   background: var(--surface);
@@ -479,6 +518,9 @@ section {
 }
 
 .events-button {
+  justify-self: center;
+  min-width: 220px;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -652,6 +694,7 @@ section {
 
   .events-button {
     justify-self: center;
+    transform: none;
   }
 }
 
