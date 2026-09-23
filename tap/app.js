@@ -15,9 +15,13 @@ const gatedContent = document.querySelectorAll(".gated-content");
 const claimForm = document.querySelector("#claim-form");
 const claimMessage = document.querySelector("#claim-message");
 const retryButton = document.querySelector("#retry-button");
+const eventCheckinForm = document.querySelector("#event-checkin-form");
+const milestoneClaimForm = document.querySelector("#milestone-claim-form");
 
 claimForm.addEventListener("submit", claimPassport);
 retryButton.addEventListener("click", loadPassport);
+eventCheckinForm.addEventListener("submit", checkInEvent);
+milestoneClaimForm.addEventListener("submit", claimMilestone);
 loadPassport();
 
 async function loadPassport() {
@@ -86,6 +90,60 @@ async function claimPassport(event) {
   }
 }
 
+async function checkInEvent(event) {
+  event.preventDefault();
+  const button = eventCheckinForm.querySelector("button[type='submit']");
+  const message = document.querySelector("#event-checkin-message");
+  const checkInCode = new FormData(eventCheckinForm).get("checkInCode")?.toString() || "";
+  button.disabled = true;
+  button.textContent = "Checking in…";
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/events/check-in`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, checkInCode })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "We couldn’t check you in.");
+    eventCheckinForm.reset();
+    renderPassport(result.passport);
+    message.textContent = `Checked in: ${result.eventTitle}`;
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Check in";
+  }
+}
+
+async function claimMilestone(event) {
+  event.preventDefault();
+  const button = milestoneClaimForm.querySelector("button[type='submit']");
+  const message = document.querySelector("#milestone-claim-message");
+  const claimCode = new FormData(milestoneClaimForm).get("claimCode")?.toString() || "";
+  button.disabled = true;
+  button.textContent = "Claiming…";
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/milestones/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, claimCode })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "We couldn’t claim this milestone.");
+    milestoneClaimForm.reset();
+    renderPassport(result.passport);
+    message.textContent = `Milestone achieved: ${result.milestoneTitle}`;
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Claim milestone";
+  }
+}
+
 function renderPassport(passport) {
   document.querySelector("#passport-name").textContent = passport.memberName;
   document.querySelector("#passport-card-number").textContent = passport.cardNumber;
@@ -95,10 +153,24 @@ function renderPassport(passport) {
   document.querySelector("#milestone-count").textContent = passport.milestoneCount;
   document.querySelector("#mission-count").textContent = passport.missionCount;
   document.querySelector("#key-count").textContent = passport.keyBalance;
+  renderInvitation(passport.invitation);
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
   showState("passport", "Access confirmed");
   showKeyAward(passport.latestKeyTransaction);
+}
+
+function renderInvitation(invitation) {
+  if (!invitation) return;
+  document.querySelector("#invitation-kicker").textContent = invitation.kicker;
+  document.querySelector("#invitation-title").textContent = invitation.title;
+  document.querySelector("#invitation-description").textContent = invitation.description;
+  const link = document.querySelector("#invitation-link");
+  link.hidden = !(invitation.buttonLabel && invitation.buttonUrl);
+  if (!link.hidden) {
+    link.textContent = invitation.buttonLabel;
+    link.href = invitation.buttonUrl;
+  }
 }
 
 function renderMilestones(milestones) {

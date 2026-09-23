@@ -163,6 +163,59 @@
   padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
 }
 
+.event-checkin {
+  padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
+}
+
+.event-checkin-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.65fr);
+  gap: 2rem;
+  align-items: center;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  border: 1px solid rgba(217, 181, 109, 0.28);
+  border-radius: 1.25rem;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  background: linear-gradient(145deg, rgba(217, 181, 109, 0.07), rgba(255, 255, 255, 0.018));
+}
+
+.event-checkin-card h2 {
+  margin-top: 0.5rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.event-checkin-card > div > p:last-child {
+  margin-top: 0.8rem;
+  color: var(--muted);
+}
+
+.event-checkin-card form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.event-checkin-card label {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.event-checkin-card input {
+  width: 100%;
+  border: 1px solid rgba(217, 181, 109, 0.38);
+  border-radius: 0.8rem;
+  padding: 0.9rem 1rem;
+  color: var(--ivory);
+  background: rgba(255, 255, 255, 0.045);
+  font: inherit;
+}
+
 .milestones-section {
   padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
 }
@@ -186,6 +239,47 @@
   max-width: 650px;
   margin-top: 1rem;
   color: var(--muted);
+}
+
+.milestone-claim {
+  display: grid;
+  gap: 0.55rem;
+  max-width: 560px;
+  margin-top: 1.5rem;
+}
+
+.milestone-claim label {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.milestone-claim > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+}
+
+.milestone-claim input {
+  border: 1px solid rgba(217, 181, 109, 0.38);
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  color: var(--ivory);
+  background: rgba(255, 255, 255, 0.045);
+  font: inherit;
+}
+
+.milestone-claim button {
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  color: var(--gold);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
 }
 
 .milestones-grid {
@@ -438,8 +532,16 @@
     grid-template-columns: 1fr;
   }
 
+  .event-checkin-card {
+    grid-template-columns: 1fr;
+  }
+
   .milestones-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .milestone-claim > div {
+    grid-template-columns: 1fr;
   }
 
   .mission-card {

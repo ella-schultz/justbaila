@@ -92,12 +92,29 @@
       </div>
     </section>
 
+    <section class="event-checkin gated-content" aria-labelledby="event-checkin-title" hidden>
+      <div class="event-checkin-card">
+        <div>
+          <p class="section-kicker">Social check-in</p>
+          <h2 id="event-checkin-title">Add an event to your passport.</h2>
+          <p>Enter the unique code shared at tonight’s social. Each event can be added once.</p>
+        </div>
+        <form id="event-checkin-form">
+          <label for="event-checkin-code">Event code</label>
+          <input id="event-checkin-code" name="checkInCode" minlength="4" maxlength="40" autocomplete="off" required />
+          <button class="member-button" type="submit">Check in</button>
+          <p class="form-message" id="event-checkin-message" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+
     <section class="featured-invitation gated-content" aria-labelledby="invitation-title" hidden>
       <div class="invitation-card">
         <div>
-          <p class="section-kicker">The next invitation</p>
+          <p class="section-kicker" id="invitation-kicker">The next invitation</p>
           <h2 id="invitation-title">Something special is taking shape.</h2>
-          <p>Keep this card close. Private event details and member opportunities will appear here first.</p>
+          <p id="invitation-description">Keep this card close. Private event details and member opportunities will appear here first.</p>
+          <a class="invitation-link" id="invitation-link" href="#" target="_blank" rel="noopener noreferrer" hidden></a>
         </div>
         <span class="invitation-mark" aria-hidden="true">JB</span>
       </div>
@@ -117,6 +134,11 @@
         <p class="section-kicker">Passport achievements</p>
         <h2 id="milestones-title">Milestones</h2>
         <p class="milestones-intro">Your place in the Inner Circle grows with every social, mission, and Key.</p>
+        <form class="milestone-claim" id="milestone-claim-form">
+          <label for="milestone-claim-code">Have a milestone code?</label>
+          <div><input id="milestone-claim-code" name="claimCode" minlength="4" maxlength="40" autocomplete="off" placeholder="Enter your code" required /><button type="submit">Claim milestone</button></div>
+          <p class="form-message" id="milestone-claim-message" aria-live="polite"></p>
+        </form>
         <div class="milestones-grid" id="milestones-grid"></div>
       </div>
     </section>
