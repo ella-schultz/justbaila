@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex" />
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#09070b" />
+  <title>JustBaila Inner Circle</title>
+  <link rel="icon" type="image/png" href="../justbaila.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../after-dark.css" />
+  <link rel="stylesheet" href="tap.css" />
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#member-content">Skip to member content</a>
+
+  <header class="private-header">
+    <a href="../index.html" class="private-brand" aria-label="Return to the JustBaila main site">
+      <img src="../justbaila.png" alt="JustBaila" />
+    </a>
+    <p>Private access</p>
+  </header>
+
+  <main id="member-content">
+    <section class="after-dark-hero tap-hero" aria-labelledby="after-dark-title">
+      <div class="glow glow-one" aria-hidden="true"></div>
+      <div class="glow glow-two" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <p class="eyebrow">JustBaila · Inner Circle</p>
+        <h1 id="after-dark-title">Welcome to the <span>inner circle.</span></h1>
+        <div class="access-seal" id="access-seal" aria-live="polite">
+          <span class="seal-dot" aria-hidden="true"></span>
+          <span id="access-label">Checking your card</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="passport-section" aria-labelledby="passport-title">
+      <div class="passport-shell">
+        <div class="passport-state" id="loading-state">
+          <p class="section-kicker">One moment</p>
+          <h2 id="passport-title">Opening your passport…</h2>
+          <p>We’re securely checking this Inner Circle card.</p>
+        </div>
+
+        <div class="passport-state" id="invalid-state" hidden>
+          <p class="section-kicker">Access unavailable</p>
+          <h2>Card not recognized.</h2>
+          <p>This card ID is invalid or has not been issued by JustBaila. Please contact the person who provided your card.</p>
+        </div>
+
+        <div class="passport-state" id="error-state" hidden>
+          <p class="section-kicker">Please try again</p>
+          <h2>We couldn’t open the Inner Circle.</h2>
+          <p id="error-message">The service is temporarily unavailable.</p>
+          <button class="member-button" id="retry-button" type="button">Try again</button>
+        </div>
+
+        <div class="passport-state claim-state" id="claim-state" hidden>
+          <p class="section-kicker">Your invitation is valid</p>
+          <h2>Activate your passport.</h2>
+          <p>This card is unclaimed. Enter the name you would like displayed on your Inner Circle passport.</p>
+          <form class="claim-form" id="claim-form">
+            <label for="member-name">Member name</label>
+            <input id="member-name" name="memberName" type="text" minlength="2" maxlength="80" autocomplete="name" required />
+            <button class="member-button" type="submit">Claim my passport</button>
+            <p class="form-message" id="claim-message" aria-live="polite"></p>
+          </form>
+        </div>
+
+        <div class="passport-state" id="passport-state" hidden>
+          <div class="passport-heading">
+            <div>
+              <p class="section-kicker">Passport active</p>
+              <h2>Welcome, <span id="passport-name"></span>.</h2>
+              <p>Inner Circle card <span id="passport-card-number"></span> · Activated <span id="passport-activation-date"></span></p>
+            </div>
+            <div class="passport-monogram" aria-hidden="true" id="passport-monogram">JB</div>
+          </div>
+          <div class="passport-stats" aria-label="Passport activity">
+            <div><strong id="attendance-count">0</strong><span>Events</span></div>
+            <div><strong id="milestone-count">0</strong><span>Milestones</span></div>
+            <div><strong id="mission-count">0</strong><span>Missions</span></div>
+            <div class="keys-stat"><strong id="key-count">0</strong><span>Keys</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="featured-invitation gated-content" aria-labelledby="invitation-title" hidden>
+      <div class="invitation-card">
+        <div>
+          <p class="section-kicker">The next invitation</p>
+          <h2 id="invitation-title">Something special is taking shape.</h2>
+          <p>Keep this card close. Private event details and member opportunities will appear here first.</p>
+        </div>
+        <span class="invitation-mark" aria-hidden="true">JB</span>
+      </div>
+    </section>
+
+    <section class="secret-missions gated-content" aria-labelledby="missions-title" hidden>
+      <div class="missions-container">
+        <p class="section-kicker">For members only</p>
+        <h2 id="missions-title">Secret missions</h2>
+        <p class="missions-intro">Complete these quiet challenges as you move deeper into the Inner Circle. New missions may appear without warning.</p>
+        <div class="missions-grid" id="missions-grid"></div>
+      </div>
+    </section>
+
+    <section class="milestones-section gated-content" aria-labelledby="milestones-title" hidden>
+      <div class="milestones-container">
+        <p class="section-kicker">Passport achievements</p>
+        <h2 id="milestones-title">Milestones</h2>
+        <p class="milestones-intro">Your place in the Inner Circle grows with every social, mission, and Key.</p>
+        <div class="milestones-grid" id="milestones-grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="key-award" id="key-award" role="status" aria-live="polite" hidden></div>
+
+  <footer class="private-footer">
+    <p>This page is intended for invited JustBaila guests.</p>
+    <a href="../index.html">Return to JustBaila</a>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,353 @@
+:root {
+  --night: #09070b;
+  --night-soft: #120d15;
+  --wine: #2b101e;
+  --plum: #4b1733;
+  --rose: #f82888;
+  --rose-soft: #ff83bb;
+  --gold: #d9b56d;
+  --ivory: #f8f1e7;
+  --muted: #bdb1bc;
+  --line: rgba(217, 181, 109, 0.24);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--night);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  color: var(--ivory);
+  background:
+    radial-gradient(circle at 8% 10%, rgba(248, 40, 136, 0.13), transparent 30rem),
+    linear-gradient(145deg, #070609 0%, #130b12 55%, #080709 100%);
+  font-family: "Inter", "Segoe UI", sans-serif;
+  line-height: 1.65;
+}
+
+a {
+  color: inherit;
+}
+
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 1rem;
+  z-index: 100;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  color: var(--night);
+  background: var(--ivory);
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
+.private-header {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1180px, calc(100% - 2.5rem));
+  margin: 0 auto;
+  padding-top: 1.25rem;
+}
+
+.private-brand {
+  display: inline-block;
+}
+
+.private-brand img {
+  display: block;
+  width: clamp(125px, 16vw, 185px);
+  filter: drop-shadow(0 8px 20px rgba(248, 40, 136, 0.18));
+}
+
+.private-header p {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.after-dark-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-height: min(880px, 100svh);
+  place-items: center;
+  overflow: hidden;
+  padding: 9rem 1.25rem 6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.after-dark-hero::before {
+  position: absolute;
+  inset: 1.25rem;
+  z-index: -1;
+  border: 1px solid rgba(217, 181, 109, 0.16);
+  border-radius: 1.5rem;
+  content: "";
+  pointer-events: none;
+}
+
+.glow {
+  position: absolute;
+  z-index: -2;
+  border-radius: 50%;
+  filter: blur(4px);
+  opacity: 0.8;
+}
+
+.glow-one {
+  top: 18%;
+  left: -8rem;
+  width: 30rem;
+  height: 30rem;
+  background: radial-gradient(circle, rgba(248, 40, 136, 0.24), transparent 68%);
+}
+
+.glow-two {
+  right: -7rem;
+  bottom: 0;
+  width: 34rem;
+  height: 34rem;
+  background: radial-gradient(circle, rgba(217, 181, 109, 0.13), transparent 68%);
+}
+
+.hero-inner {
+  width: min(880px, 100%);
+  text-align: center;
+}
+
+.eyebrow,
+.section-kicker {
+  color: var(--gold);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.hero-inner h1 {
+  max-width: 850px;
+  margin: 1rem auto 1.35rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(3.5rem, 9vw, 7.4rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.88;
+}
+
+.hero-inner h1 span {
+  display: block;
+  color: var(--rose-soft);
+  font-style: italic;
+}
+
+.hero-copy {
+  max-width: 640px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(1.25rem, 2.5vw, 1.65rem);
+  line-height: 1.45;
+}
+
+.access-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 2.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  color: #e8dccc;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+}
+
+.seal-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 16px rgba(248, 40, 136, 0.85);
+}
+
+.member-section,
+.featured-invitation {
+  padding: clamp(5rem, 9vw, 8rem) 1.25rem;
+}
+
+.member-container,
+.invitation-card {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.member-container > h2,
+.invitation-card h2 {
+  margin-top: 0.5rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.6rem, 6vw, 4.7rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.privilege-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 3rem;
+}
+
+.privilege-card {
+  min-height: 290px;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.card-number {
+  display: block;
+  color: var(--gold);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.25rem;
+}
+
+.privilege-card h3 {
+  margin-top: 4.25rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.privilege-card p {
+  margin-top: 0.8rem;
+  color: var(--muted);
+}
+
+.featured-invitation {
+  padding-top: 0;
+}
+
+.invitation-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2rem;
+  overflow: hidden;
+  border: 1px solid rgba(248, 40, 136, 0.36);
+  border-radius: 1.5rem;
+  padding: clamp(2rem, 6vw, 4.5rem);
+  background:
+    radial-gradient(circle at 88% 20%, rgba(248, 40, 136, 0.2), transparent 17rem),
+    linear-gradient(135deg, rgba(75, 23, 51, 0.72), rgba(18, 13, 21, 0.96));
+  box-shadow: 0 34px 100px rgba(0, 0, 0, 0.35);
+}
+
+.invitation-card p:not(.section-kicker) {
+  max-width: 620px;
+  margin-top: 1.1rem;
+  color: var(--muted);
+}
+
+.invitation-mark {
+  display: grid;
+  width: 7rem;
+  height: 7rem;
+  place-items: center;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  color: var(--gold);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 2.4rem;
+  letter-spacing: 0.05em;
+}
+
+.private-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(1120px, calc(100% - 2.5rem));
+  margin: 0 auto;
+  border-top: 1px solid var(--line);
+  padding: 2rem 0 3rem;
+  color: #8f858e;
+  font-size: 0.82rem;
+}
+
+.private-footer a {
+  color: var(--gold);
+  font-weight: 600;
+  text-decoration-color: rgba(217, 181, 109, 0.42);
+  text-underline-offset: 0.25em;
+}
+
+@media (max-width: 760px) {
+  .private-header p {
+    display: none;
+  }
+
+  .after-dark-hero {
+    min-height: 760px;
+  }
+
+  .after-dark-hero::before {
+    inset: 0.75rem;
+  }
+
+  .privilege-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .privilege-card {
+    min-height: auto;
+  }
+
+  .privilege-card h3 {
+    margin-top: 2.5rem;
+  }
+
+  .invitation-card {
+    grid-template-columns: 1fr;
+  }
+
+  .invitation-mark {
+    width: 5.5rem;
+    height: 5.5rem;
+  }
+
+  .private-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

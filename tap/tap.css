@@ -1,0 +1,452 @@
+.tap-hero {
+  min-height: min(760px, 88svh);
+}
+
+.passport-section {
+  position: relative;
+  z-index: 2;
+  padding: 0 1.25rem;
+}
+
+.passport-shell {
+  width: min(920px, 100%);
+  min-height: 300px;
+  margin: -4rem auto 0;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  padding: clamp(2rem, 6vw, 4rem);
+  background:
+    radial-gradient(circle at 90% 10%, rgba(248, 40, 136, 0.16), transparent 18rem),
+    rgba(18, 13, 21, 0.96);
+  box-shadow: 0 34px 100px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.passport-state[hidden] {
+  display: none;
+}
+
+.gated-content[hidden] {
+  display: none;
+}
+
+.passport-state h2 {
+  margin-top: 0.45rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.passport-state > p:not(.section-kicker),
+.passport-heading p {
+  max-width: 650px;
+  margin-top: 1rem;
+  color: var(--muted);
+}
+
+.claim-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 520px;
+  margin-top: 1.75rem;
+}
+
+.claim-form label {
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.claim-form input {
+  width: 100%;
+  border: 1px solid rgba(217, 181, 109, 0.38);
+  border-radius: 0.8rem;
+  outline: none;
+  padding: 0.95rem 1rem;
+  color: var(--ivory);
+  background: rgba(255, 255, 255, 0.055);
+  font: inherit;
+}
+
+.claim-form input:focus {
+  border-color: var(--rose-soft);
+  box-shadow: 0 0 0 3px rgba(248, 40, 136, 0.16);
+}
+
+.member-button {
+  justify-self: start;
+  margin-top: 0.35rem;
+  border: 1px solid var(--rose-soft);
+  border-radius: 999px;
+  padding: 0.8rem 1.2rem;
+  color: #11080e;
+  background: linear-gradient(135deg, var(--rose), var(--rose-soft));
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.member-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.form-message {
+  min-height: 1.5rem;
+  color: var(--rose-soft);
+  font-size: 0.9rem;
+}
+
+.passport-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2rem;
+}
+
+.passport-heading h2 span {
+  color: var(--rose-soft);
+  font-style: italic;
+}
+
+.passport-monogram {
+  display: grid;
+  width: 7rem;
+  height: 7rem;
+  place-items: center;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  color: var(--gold);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+}
+
+.passport-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 2.25rem;
+}
+
+.passport-stats div {
+  border: 1px solid rgba(217, 181, 109, 0.18);
+  border-radius: 0.9rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.passport-stats strong,
+.passport-stats span {
+  display: block;
+}
+
+.passport-stats strong {
+  color: var(--ivory);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.passport-stats span {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.secret-missions {
+  padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
+}
+
+.milestones-section {
+  padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
+}
+
+.milestones-container {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  border-top: 1px solid var(--line);
+  padding-top: clamp(4rem, 8vw, 6.5rem);
+}
+
+.milestones-container h2 {
+  margin-top: 0.5rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.6rem, 6vw, 4.7rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.milestones-intro {
+  max-width: 650px;
+  margin-top: 1rem;
+  color: var(--muted);
+}
+
+.milestones-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 2.5rem;
+}
+
+.milestone-card {
+  min-height: 250px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 1.1rem;
+  padding: 1.2rem;
+  background: rgba(255, 255, 255, 0.018);
+  opacity: 0.58;
+}
+
+.milestone-card.milestone-achieved {
+  border-color: rgba(217, 181, 109, 0.55);
+  background: radial-gradient(circle at top right, rgba(217, 181, 109, 0.13), transparent 9rem), rgba(255, 255, 255, 0.025);
+  opacity: 1;
+}
+
+.milestone-seal {
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--gold);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.4rem;
+}
+
+.milestone-status {
+  margin-top: 1.4rem;
+  color: var(--gold);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.milestone-card h3 {
+  margin-top: 0.55rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.45rem;
+  line-height: 1.05;
+}
+
+.milestone-card > p:last-child {
+  margin-top: 0.7rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.missions-container {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  border-top: 1px solid var(--line);
+  padding-top: clamp(4rem, 8vw, 6.5rem);
+}
+
+.missions-container h2 {
+  margin-top: 0.5rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.6rem, 6vw, 4.7rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.missions-intro {
+  max-width: 650px;
+  margin-top: 1rem;
+  color: var(--muted);
+}
+
+.missions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2.5rem;
+}
+
+.mission-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 330px;
+  border: 1px solid rgba(248, 40, 136, 0.3);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(248, 40, 136, 0.13), transparent 11rem),
+    linear-gradient(145deg, rgba(75, 23, 51, 0.42), rgba(255, 255, 255, 0.018));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.mission-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--gold);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mission-status {
+  border: 1px solid rgba(248, 40, 136, 0.42);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  color: var(--rose-soft);
+}
+
+.mission-card h3 {
+  margin-top: 4rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.mission-card > p:not(.mission-reward) {
+  margin-top: 0.8rem;
+  color: var(--muted);
+}
+
+.mission-reward {
+  margin-top: 1.25rem;
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mission-claim-form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1.25rem;
+}
+
+.mission-claim-form label {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--gold);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mission-claim-form input {
+  width: 100%;
+  border: 1px solid rgba(217, 181, 109, 0.32);
+  border-radius: 0.7rem;
+  padding: 0.75rem 0.85rem;
+  color: var(--ivory);
+  background: rgba(255, 255, 255, 0.045);
+  font: inherit;
+}
+
+.mission-claim-button {
+  justify-self: start;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  color: var(--gold);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mission-claim-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.mission-claim-message {
+  min-height: 1.2rem;
+  color: var(--rose-soft) !important;
+  font-size: 0.78rem;
+}
+
+.keys-stat {
+  border-color: rgba(217, 181, 109, 0.48) !important;
+  background: linear-gradient(145deg, rgba(217, 181, 109, 0.1), rgba(248, 40, 136, 0.04)) !important;
+}
+
+.keys-stat strong {
+  color: var(--gold);
+}
+
+.mission-card.mission-completed {
+  border-color: rgba(217, 181, 109, 0.5);
+  background:
+    radial-gradient(circle at 90% 10%, rgba(217, 181, 109, 0.13), transparent 11rem),
+    linear-gradient(145deg, rgba(62, 51, 35, 0.5), rgba(255, 255, 255, 0.018));
+}
+
+.mission-completed .mission-status {
+  border-color: rgba(217, 181, 109, 0.55);
+  color: var(--gold);
+}
+
+.key-award {
+  position: fixed;
+  z-index: 20;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  max-width: calc(100vw - 2.5rem);
+  border: 1px solid rgba(217, 181, 109, 0.7);
+  border-radius: 999px;
+  padding: 0.9rem 1.25rem;
+  color: var(--gold);
+  background: rgba(17, 10, 16, 0.96);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.48), 0 0 30px rgba(248, 40, 136, 0.12);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  opacity: 0;
+  transform: translateY(0.75rem);
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+
+.key-award.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (max-width: 640px) {
+  .passport-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .passport-monogram {
+    width: 5.5rem;
+    height: 5.5rem;
+  }
+
+  .passport-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .missions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .milestones-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mission-card {
+    min-height: auto;
+  }
+
+  .mission-card h3 {
+    margin-top: 2.5rem;
+  }
+}
