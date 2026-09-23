@@ -16,6 +16,7 @@ const claimForm = document.querySelector("#claim-form");
 const claimMessage = document.querySelector("#claim-message");
 const retryButton = document.querySelector("#retry-button");
 const eventCheckinForm = document.querySelector("#event-checkin-form");
+const eventCheckinSection = document.querySelector(".event-checkin");
 const milestoneClaimForm = document.querySelector("#milestone-claim-form");
 
 claimForm.addEventListener("submit", claimPassport);
@@ -157,6 +158,7 @@ function renderPassport(passport) {
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
   showState("passport", "Access confirmed");
+  eventCheckinSection.hidden = !passport.socialCheckinVisible;
   showKeyAward(passport.latestKeyTransaction);
 }
 
@@ -166,10 +168,15 @@ function renderInvitation(invitation) {
   document.querySelector("#invitation-title").textContent = invitation.title;
   document.querySelector("#invitation-description").textContent = invitation.description;
   const link = document.querySelector("#invitation-link");
-  link.hidden = !(invitation.buttonLabel && invitation.buttonUrl);
+  const buttonLabel = invitation.buttonLabel?.trim() || "";
+  const buttonUrl = invitation.buttonUrl?.trim() || "";
+  link.hidden = !(buttonLabel && buttonUrl);
   if (!link.hidden) {
-    link.textContent = invitation.buttonLabel;
-    link.href = invitation.buttonUrl;
+    link.textContent = buttonLabel;
+    link.href = buttonUrl;
+  } else {
+    link.textContent = "";
+    link.removeAttribute("href");
   }
 }
 
@@ -184,7 +191,7 @@ function renderMilestones(milestones) {
     seal.textContent = milestone.achieved ? "✓" : "◇";
     const status = document.createElement("p");
     status.className = "milestone-status";
-    status.textContent = milestone.achieved ? "Achieved" : "Locked";
+    status.textContent = milestone.achieved ? "Achieved" : milestone.claimableByCode ? "Code required" : "Locked";
     const title = document.createElement("h3");
     title.textContent = milestone.title;
     const description = document.createElement("p");

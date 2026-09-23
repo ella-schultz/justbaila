@@ -286,6 +286,10 @@ a {
   text-decoration: none;
 }
 
+.invitation-link[hidden] {
+  display: none;
+}
+
 .invitation-link:hover,
 .invitation-link:focus-visible {
   color: var(--ivory);

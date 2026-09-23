@@ -52,6 +52,8 @@ export default {
         if (url.pathname === "/api/admin/missions/set-active") return await setMissionActive(body, env, cors);
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
+        if (url.pathname === "/api/admin/social-checkin/get") return await getAdminSocialCheckin(env, cors);
+        if (url.pathname === "/api/admin/social-checkin/update") return await updateSocialCheckin(body, env, cors);
         if (url.pathname === "/api/admin/schedule/list") return await listAdminSchedule(env, cors);
         if (url.pathname === "/api/admin/schedule/create") return await createScheduleEntry(body, env, cors);
         if (url.pathname === "/api/admin/schedule/update") return await updateScheduleEntry(body, env, cors);
@@ -140,7 +142,7 @@ async function buildPublicPassport(passport, env) {
       ORDER BY m.sort_order, m.id
     `).bind(passport.passport_id).all(),
     env.DB.prepare(`
-      SELECT kicker, title, description, button_label, button_url, updated_at
+      SELECT kicker, title, description, button_label, button_url, social_checkin_visible, updated_at
       FROM invitation_settings WHERE id = 1
     `).first()
   ]);
@@ -164,6 +166,7 @@ async function buildPublicPassport(passport, env) {
     milestoneCount: milestones.filter((milestone) => milestone.achieved).length,
     missionCount: Number(passport.mission_count || 0),
     keyBalance: Number(passport.key_balance || 0),
+    socialCheckinVisible: Boolean(invitation?.social_checkin_visible),
     invitation: invitation ? {
       kicker: invitation.kicker,
       title: invitation.title,
@@ -456,6 +459,10 @@ async function listAdminEvents(env, cors) {
 }
 
 async function checkInEvent(body, env, cors) {
+  const setting = await env.DB.prepare(`
+    SELECT social_checkin_visible FROM invitation_settings WHERE id = 1
+  `).first();
+  if (!setting || !setting.social_checkin_visible) throw new HttpError(403, "Social check-in is not open right now.");
   const cardId = normalizeCardId(body.cardId);
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
@@ -473,6 +480,24 @@ async function checkInEvent(body, env, cors) {
   if (!result) throw new HttpError(409, "You already checked in to this event.");
   const refreshed = await getPassportByHash(await sha256(cardId), env);
   return json({ status: "checked_in", eventTitle: event.title, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
+}
+
+async function getAdminSocialCheckin(env, cors) {
+  const setting = await env.DB.prepare(`
+    SELECT social_checkin_visible FROM invitation_settings WHERE id = 1
+  `).first();
+  if (!setting) throw new HttpError(404, "Social check-in settings were not found.");
+  return json({ visible: Boolean(setting.social_checkin_visible) }, 200, cors);
+}
+
+async function updateSocialCheckin(body, env, cors) {
+  const visible = normalizeBoolean(body.visible);
+  await env.DB.prepare(`
+    UPDATE invitation_settings
+    SET social_checkin_visible = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin'
+    WHERE id = 1
+  `).bind(visible).run();
+  return json({ visible: Boolean(visible) }, 200, cors);
 }
 
 async function claimMilestone(body, env, cors) {
@@ -727,6 +752,11 @@ function normalizePositiveInteger(value, label) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < 1) throw new HttpError(400, `${label} is invalid.`);
   return number;
+}
+
+function normalizeBoolean(value) {
+  if (value !== true && value !== false) throw new HttpError(400, "Visibility setting is invalid.");
+  return value ? 1 : 0;
 }
 
 function normalizeOptionalNote(value) {
