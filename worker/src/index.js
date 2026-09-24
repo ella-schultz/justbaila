@@ -64,6 +64,7 @@ export default {
         if (url.pathname === "/api/admin/missions/update") return await updateMission(body, env, cors);
         if (url.pathname === "/api/admin/missions/set-active") return await setMissionActive(body, env, cors);
         if (url.pathname === "/api/admin/missions/set-code") return await setMissionCode(body, env, cors);
+        if (url.pathname === "/api/admin/missions/revoke-assignment") return await revokeMissionAssignment(body, env, cors);
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
         if (url.pathname === "/api/admin/events/set-code") return await setEventCode(body, env, cors);
@@ -152,15 +153,17 @@ async function buildPublicPassport(passport, env) {
   const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
   const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult] = await Promise.all([
     env.DB.prepare(`
-      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event,
+      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event, m.scope,
+        ma.status AS assignment_status,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
         COALESCE(SUM(CASE WHEN kt.amount > 0 THEN kt.amount ELSE 0 END), 0) AS keys_earned
       FROM missions m
       LEFT JOIN mission_completions mc ON mc.mission_id = m.id AND mc.passport_id = ?
       LEFT JOIN key_transactions kt ON kt.reason_type = 'mission' AND kt.reason_id = mc.id
-      WHERE m.active = 1
-      GROUP BY m.id ORDER BY m.sort_order, m.id
-    `).bind(passport.passport_id).all(),
+      LEFT JOIN mission_assignments ma ON ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed')
+      WHERE m.active = 1 AND (m.scope = 'global' OR ma.id IS NOT NULL)
+      GROUP BY m.id, ma.id ORDER BY m.sort_order, m.id
+    `).bind(passport.passport_id, passport.passport_id).all(),
     env.DB.prepare(`
       SELECT id, amount, description, created_at FROM key_transactions
       WHERE passport_id = ? AND amount > 0 ORDER BY created_at DESC, id DESC LIMIT 1
@@ -209,6 +212,7 @@ async function buildPublicPassport(passport, env) {
     attendanceCount: Number(passport.attendance_count || 0),
     milestoneCount: milestones.filter((milestone) => milestone.achieved).length,
     missionCount: Number(passport.mission_count || 0),
+    undergroundLevel: getUndergroundLevel(Number(passport.mission_count || 0)),
     keyBalance: Number(passport.key_balance || 0),
     relayCode,
     signals: (signalsResult.results || []).map((signal) => ({
@@ -240,6 +244,9 @@ async function buildPublicPassport(passport, env) {
       repeatable: Boolean(mission.repeatable),
       verificationRequired: Boolean(mission.verification_required),
       countsAsEvent: Boolean(mission.counts_as_event),
+      scope: mission.scope,
+      privateAssignment: mission.scope === "individual",
+      assignmentStatus: mission.assignment_status || null,
       completed: Number(mission.completion_count) > 0,
       completionCount: Number(mission.completion_count),
       completedAt: mission.completed_at,
@@ -252,6 +259,16 @@ async function buildPublicPassport(passport, env) {
       createdAt: latestKeyTransaction.created_at
     } : null
   };
+}
+
+function getUndergroundLevel(completedMissionCount) {
+  if (completedMissionCount >= 30) return "UNKNOWN";
+  if (completedMissionCount >= 19) return "ARCHITECT";
+  if (completedMissionCount >= 13) return "ENVOY";
+  if (completedMissionCount >= 6) return "INSIDER";
+  if (completedMissionCount >= 3) return "AGENT";
+  if (completedMissionCount >= 1) return "OPERATIVE";
+  return "INITIATE";
 }
 
 async function ensureMemberRelayCode(passportId, env) {
@@ -638,9 +655,12 @@ async function completeMission(body, env, cors) {
   const passport = await getPassportById(passportId, env);
   if (!passport) throw new HttpError(404, "Passport not found.");
   const mission = await env.DB.prepare(`
-    SELECT id, code, title, key_reward, repeatable FROM missions WHERE code = ? AND active = 1 LIMIT 1
-  `).bind(missionCode).first();
+    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.scope,
+      (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
+    FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
+  `).bind(passportId, missionCode).first();
   if (!mission) throw new HttpError(404, "Mission not found.");
+  if (mission.scope === "individual" && !mission.assignment_id) throw new HttpError(404, "Private assignment not found for this member.");
 
   const existingRequest = await env.DB.prepare(`
     SELECT mc.id, mc.passport_id, mc.mission_id, COALESCE(kt.amount, 0) AS amount
@@ -675,6 +695,12 @@ async function completeMission(body, env, cors) {
       VALUES (?, ?, ?, 'earned', 'mission', ?, ?, 'inner-circle-admin')
     `).bind(`key_${idempotencyKey}`, passportId, keysAwarded, idempotencyKey, `Mission complete: ${mission.title}`));
   }
+  if (mission.assignment_id) {
+    statements.push(env.DB.prepare(`
+      UPDATE mission_assignments SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'active'
+    `).bind(mission.assignment_id));
+  }
 
   try {
     await env.DB.batch(statements);
@@ -703,10 +729,12 @@ async function claimMission(body, env, cors) {
   if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before claiming missions.");
 
   const mission = await env.DB.prepare(`
-    SELECT id, code, title, key_reward, repeatable, verification_required, verification_code_hash
-    FROM missions WHERE code = ? AND active = 1 LIMIT 1
-  `).bind(missionCode).first();
+    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.verification_required, m.verification_code_hash, m.scope,
+      (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
+    FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
+  `).bind(passport.passport_id, missionCode).first();
   if (!mission) throw new HttpError(404, "Mission not found.");
+  if (mission.scope === "individual" && !mission.assignment_id) throw new HttpError(404, "That private assignment is not available to this member.");
 
   if (mission.verification_required) {
     const verificationCode = normalizeVerificationCode(body.verificationCode);
@@ -737,6 +765,12 @@ async function claimMission(body, env, cors) {
       VALUES (?, ?, ?, 'earned', 'mission', ?, ?, ?)
     `).bind(`key_${idempotencyKey}`, passport.passport_id, keysAwarded, idempotencyKey, `Mission complete: ${mission.title}`, mission.verification_required ? "member-code" : "member-honor"));
   }
+  if (mission.assignment_id) {
+    statements.push(env.DB.prepare(`
+      UPDATE mission_assignments SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'active'
+    `).bind(mission.assignment_id));
+  }
 
   try {
     await env.DB.batch(statements);
@@ -760,6 +794,10 @@ async function createMission(body, env, cors) {
   const keyReward = Number(body.keyReward);
   if (!Number.isInteger(keyReward) || keyReward < 0 || keyReward > 100) throw new HttpError(400, "Key reward must be between 0 and 100.");
   const repeatable = body.repeatable ? 1 : 0;
+  const scope = normalizeMissionScope(body.scope);
+  if (scope === "individual" && repeatable) throw new HttpError(400, "Individual assignments cannot be repeatable.");
+  const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
+  if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
   let verificationCodeHash = null;
   let verificationCodeDisplay = null;
@@ -771,23 +809,38 @@ async function createMission(body, env, cors) {
   const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "mission";
   const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
   const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM missions`).first();
-  await env.DB.prepare(`
+  const statements = [env.DB.prepare(`
     INSERT INTO missions
-      (code, title, description, key_reward, repeatable, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event)
-    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0)
-  `).bind(code, title, description, keyReward, repeatable, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay).run();
+      (code, title, description, key_reward, repeatable, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event, scope)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?)
+  `).bind(code, title, description, keyReward, repeatable, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay, scope)];
+  if (scope === "individual") {
+    statements.push(env.DB.prepare(`
+      INSERT INTO mission_assignments (id, mission_id, passport_id, assigned_by)
+      SELECT ?, id, ?, 'inner-circle-admin' FROM missions WHERE code = ?
+    `).bind(`assignment_${crypto.randomUUID()}`, assignedPassportId, code));
+  }
+  await env.DB.batch(statements);
 
-  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), verificationRequired: Boolean(verificationRequired) } }, 201, cors);
+  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), verificationRequired: Boolean(verificationRequired), scope } }, 201, cors);
 }
 
 async function listAdminMissions(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required,
+    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.scope,
       m.verification_code_display, m.verification_code_hash IS NOT NULL AS code_configured, m.active,
-      COUNT(mc.id) AS completion_count
+      COUNT(mc.id) AS completion_count,
+      ma.id AS assignment_id, ma.passport_id AS assigned_passport_id, ma.status AS assignment_status,
+      ma.assigned_at, ma.completed_at, ma.revoked_at, p.member_name AS assigned_member_name, c.card_number AS assigned_card_number
     FROM missions m
     LEFT JOIN mission_completions mc ON mc.mission_id = m.id
-    GROUP BY m.id
+    LEFT JOIN mission_assignments ma ON ma.id = (
+      SELECT latest.id FROM mission_assignments latest WHERE latest.mission_id = m.id
+      ORDER BY CASE latest.status WHEN 'active' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END, latest.assigned_at DESC LIMIT 1
+    )
+    LEFT JOIN passports p ON p.id = ma.passport_id
+    LEFT JOIN cards c ON c.id = p.card_id
+    GROUP BY m.id, ma.id
     ORDER BY m.active DESC, m.sort_order, m.id
   `).all();
   return json({ missions: (result.results || []).map(toAdminMission) }, 200, cors);
@@ -795,13 +848,22 @@ async function listAdminMissions(env, cors) {
 
 async function updateMission(body, env, cors) {
   const code = String(body.code || "").trim();
-  const existing = await env.DB.prepare(`SELECT id, verification_required, verification_code_hash, verification_code_display FROM missions WHERE code = ?`).bind(code).first();
+  const existing = await env.DB.prepare(`
+    SELECT m.id, m.verification_required, m.verification_code_hash, m.verification_code_display,
+      (SELECT ma.passport_id FROM mission_assignments ma WHERE ma.mission_id = m.id ORDER BY ma.assigned_at DESC LIMIT 1) AS latest_assigned_passport_id,
+      (SELECT ma.status FROM mission_assignments ma WHERE ma.mission_id = m.id ORDER BY ma.assigned_at DESC LIMIT 1) AS latest_assignment_status
+    FROM missions m WHERE m.code = ?
+  `).bind(code).first();
   if (!existing) throw new HttpError(404, "Mission not found.");
   const title = normalizeMissionText(body.title, "Mission title", 3, 80);
   const description = normalizeMissionText(body.description, "Description", 10, 500);
   const keyReward = Number(body.keyReward);
   if (!Number.isInteger(keyReward) || keyReward < 0 || keyReward > 100) throw new HttpError(400, "Key reward must be between 0 and 100.");
   const repeatable = body.repeatable ? 1 : 0;
+  const scope = normalizeMissionScope(body.scope);
+  if (scope === "individual" && repeatable) throw new HttpError(400, "Individual assignments cannot be repeatable.");
+  const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
+  if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
   let verificationCodeHash = existing.verification_code_hash;
   let verificationCodeDisplay = existing.verification_code_display;
@@ -812,12 +874,34 @@ async function updateMission(body, env, cors) {
   if (verificationRequired && !verificationCodeHash) throw new HttpError(400, "Enter a verification code for this mission.");
   if (!verificationRequired) { verificationCodeHash = null; verificationCodeDisplay = null; }
 
-  await env.DB.prepare(`
+  const statements = [env.DB.prepare(`
     UPDATE missions SET title = ?, description = ?, key_reward = ?, repeatable = ?,
-      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, updated_at = CURRENT_TIMESTAMP
+      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, scope = ?, updated_at = CURRENT_TIMESTAMP
     WHERE code = ?
-  `).bind(title, description, keyReward, repeatable, verificationRequired, verificationCodeHash, verificationCodeDisplay, code).run();
+  `).bind(title, description, keyReward, repeatable, verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, code)];
+  const activeAssignment = await env.DB.prepare(`
+    SELECT ma.id, ma.passport_id FROM mission_assignments ma WHERE ma.mission_id = ? AND ma.status = 'active' LIMIT 1
+  `).bind(existing.id).first();
+  if (scope === "global" && activeAssignment) {
+    statements.push(env.DB.prepare(`UPDATE mission_assignments SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'`).bind(activeAssignment.id));
+  }
+  const completedForSelectedMember = existing.latest_assignment_status === "completed" && Number(existing.latest_assigned_passport_id) === assignedPassportId;
+  if (scope === "individual" && !completedForSelectedMember && (!activeAssignment || Number(activeAssignment.passport_id) !== assignedPassportId)) {
+    if (activeAssignment) statements.push(env.DB.prepare(`UPDATE mission_assignments SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'`).bind(activeAssignment.id));
+    statements.push(env.DB.prepare(`INSERT INTO mission_assignments (id, mission_id, passport_id, assigned_by) VALUES (?, ?, ?, 'inner-circle-admin')`).bind(`assignment_${crypto.randomUUID()}`, existing.id, assignedPassportId));
+  }
+  await env.DB.batch(statements);
   return json({ status: "updated" }, 200, cors);
+}
+
+async function revokeMissionAssignment(body, env, cors) {
+  const assignmentId = String(body.assignmentId || "").trim();
+  const result = await env.DB.prepare(`
+    UPDATE mission_assignments SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'active' RETURNING id
+  `).bind(assignmentId).first();
+  if (!result) throw new HttpError(404, "Active assignment not found.");
+  return json({ status: "revoked" }, 200, cors);
 }
 
 async function setMissionActive(body, env, cors) {
@@ -1096,7 +1180,15 @@ function toAdminMission(mission) {
     keyReward: Number(mission.key_reward), repeatable: Boolean(mission.repeatable),
     verificationRequired: Boolean(mission.verification_required), verificationCode: mission.verification_code_display || "",
     codeConfigured: Boolean(mission.code_configured), active: Boolean(mission.active),
-    completionCount: Number(mission.completion_count)
+    completionCount: Number(mission.completion_count), scope: mission.scope || "global",
+    assignmentId: mission.assignment_id || null,
+    assignedPassportId: mission.assigned_passport_id ? Number(mission.assigned_passport_id) : null,
+    assignedMemberName: mission.assigned_member_name || null,
+    assignedCardNumber: mission.assigned_card_number || null,
+    assignmentStatus: mission.assignment_status || null,
+    assignedAt: mission.assigned_at || null,
+    assignmentCompletedAt: mission.completed_at || null,
+    assignmentRevokedAt: mission.revoked_at || null
   };
 }
 
@@ -1317,6 +1409,12 @@ function normalizeVerificationCode(value) {
   const code = String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
   if (code.length < 4 || code.length > 40) throw new HttpError(400, "Mission code must be between 4 and 40 characters.");
   return code;
+}
+
+function normalizeMissionScope(value) {
+  const scope = String(value || "global").trim().toLowerCase();
+  if (scope !== "global" && scope !== "individual") throw new HttpError(400, "Choose a valid mission assignment.");
+  return scope;
 }
 
 function normalizeRelayCode(value) {

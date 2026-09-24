@@ -33,10 +33,10 @@
       <div class="hero-inner">
         <p class="eyebrow">JustBaila Underground</p>
         <h1 id="after-dark-title">Welcome to the <span>inner circle.</span></h1>
-        <div class="access-seal" id="access-seal" aria-live="polite">
+        <a class="access-seal" id="access-seal" href="#private-assignment" aria-live="polite" hidden>
           <span class="seal-dot" aria-hidden="true"></span>
           <span id="access-label">Following the signal</span>
-        </div>
+        </a>
       </div>
     </section>
 
@@ -78,7 +78,7 @@
             <div>
               <p class="section-kicker">Access granted</p>
               <h2>Welcome, <span id="passport-name"></span>.</h2>
-              <p>Access card <span id="passport-card-number"></span> · Access since <span id="passport-activation-date"></span></p>
+              <p class="underground-level" id="underground-level">INITIATE</p>
               <p class="member-relay-identity">Relay code <strong id="member-relay-code">------</strong></p>
             </div>
             <div class="passport-monogram" aria-hidden="true" id="passport-monogram">JB</div>
@@ -89,6 +89,7 @@
             <div><strong id="mission-count">0</strong><span>Missions</span></div>
             <div class="keys-stat"><strong id="key-count">0</strong><span>Keys</span></div>
           </div>
+          <p class="access-card-meta">Access card <span id="passport-card-number"></span> · Access since <span id="passport-activation-date"></span></p>
         </div>
       </div>
     </section>

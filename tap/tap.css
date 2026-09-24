@@ -114,6 +114,44 @@
   font-style: italic;
 }
 
+.underground-level {
+  margin: 0.8rem 0 0 !important;
+  color: var(--rose-soft) !important;
+  font-size: clamp(0.82rem, 2vw, 1rem);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.access-seal {
+  text-decoration: none;
+  transition: border-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.access-seal[hidden] {
+  display: none;
+}
+
+.access-seal.has-private-assignment {
+  border-color: rgba(248, 40, 136, 0.55);
+  color: var(--rose-soft);
+  box-shadow: 0 0 24px rgba(248, 40, 136, 0.12);
+}
+
+.access-seal.has-private-assignment:hover,
+.access-seal.has-private-assignment:focus-visible {
+  color: var(--ivory);
+  box-shadow: 0 0 30px rgba(248, 40, 136, 0.2);
+  transform: translateY(-1px);
+}
+
+.access-card-meta {
+  margin: 1rem 0 0 !important;
+  color: rgba(185, 173, 182, 0.72) !important;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
 .passport-monogram {
   display: grid;
   width: 7rem;
@@ -481,6 +519,18 @@
     radial-gradient(circle at 90% 10%, rgba(248, 40, 136, 0.13), transparent 11rem),
     linear-gradient(145deg, rgba(75, 23, 51, 0.42), rgba(255, 255, 255, 0.018));
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.mission-card.mission-private {
+  border-color: rgba(248, 40, 136, 0.68);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28), 0 0 34px rgba(248, 40, 136, 0.1);
+}
+
+.private-assignment-copy {
+  margin: 1.6rem 0 -2.8rem !important;
+  color: var(--rose-soft) !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
 }
 
 .mission-meta {

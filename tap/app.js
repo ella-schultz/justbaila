@@ -1,6 +1,7 @@
 const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const API_BASE_URL = "https://justbaila-inner-circle-api.justbaila-inner-circle.workers.dev";
 const cardId = new URLSearchParams(window.location.search).get("id")?.trim().toUpperCase() || "";
+let currentUndergroundLevel = null;
 
 const states = {
   loading: document.querySelector("#loading-state"),
@@ -11,6 +12,7 @@ const states = {
 };
 
 const accessLabel = document.querySelector("#access-label");
+const accessSeal = document.querySelector("#access-seal");
 const gatedContent = document.querySelectorAll(".gated-content");
 const claimForm = document.querySelector("#claim-form");
 const claimMessage = document.querySelector("#claim-message");
@@ -147,7 +149,10 @@ async function claimMilestone(event) {
 }
 
 function renderPassport(passport) {
+  const previousLevel = currentUndergroundLevel;
+  currentUndergroundLevel = passport.undergroundLevel;
   document.querySelector("#passport-name").textContent = passport.memberName;
+  document.querySelector("#underground-level").textContent = passport.undergroundLevel;
   document.querySelector("#passport-card-number").textContent = passport.cardNumber;
   document.querySelector("#passport-activation-date").textContent = formatDate(passport.activationDate);
   document.querySelector("#passport-monogram").textContent = getInitials(passport.memberName);
@@ -156,15 +161,32 @@ function renderPassport(passport) {
   document.querySelector("#mission-count").textContent = passport.missionCount;
   document.querySelector("#key-count").textContent = passport.keyBalance;
   document.querySelector("#member-relay-code").textContent = passport.relayCode || "------";
+  const privateAssignment = (passport.missions || []).find((mission) => mission.privateAssignment && mission.assignmentStatus === "active" && !mission.completed);
   renderSignals(passport.signals || []);
   renderInvitation(passport.invitation);
   renderRewards(passport.rewards || [], passport.keyBalance);
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
   showState("passport", "Access granted");
+  accessSeal.hidden = !privateAssignment;
+  accessSeal.href = "#private-assignment";
+  accessSeal.classList.toggle("has-private-assignment", Boolean(privateAssignment));
+  accessLabel.textContent = "Private assignment";
   eventCheckinSection.hidden = !passport.socialCheckinVisible;
   signalsSection.hidden = !(passport.signalsVisible && (passport.signals || []).length > 0);
-  showKeyAward(passport.latestKeyTransaction);
+  if (previousLevel && previousLevel !== passport.undergroundLevel) showLevelUpdate(previousLevel, passport.undergroundLevel);
+  else showKeyAward(passport.latestKeyTransaction);
+}
+
+function showLevelUpdate(previousLevel, nextLevel) {
+  const award = document.querySelector("#key-award");
+  award.textContent = `LEVEL UPDATED // ${previousLevel} → ${nextLevel}`;
+  award.hidden = false;
+  window.setTimeout(() => award.classList.add("is-visible"), 50);
+  window.setTimeout(() => {
+    award.classList.remove("is-visible");
+    window.setTimeout(() => { award.hidden = true; }, 500);
+  }, 5000);
 }
 
 function renderSignals(signals) {
@@ -369,14 +391,19 @@ async function claimMilestoneDirect(milestone, button, message) {
 
 function renderMissions(missions) {
   const grid = document.querySelector("#missions-grid");
+  let privateAnchorAssigned = false;
   grid.replaceChildren(...missions.map((mission, index) => {
     const article = document.createElement("article");
-    article.className = `mission-card${mission.completed ? " mission-completed" : ""}`;
+    article.className = `mission-card${mission.completed ? " mission-completed" : ""}${mission.privateAssignment ? " mission-private" : ""}`;
+    if (mission.privateAssignment && mission.assignmentStatus === "active" && !privateAnchorAssigned) {
+      article.id = "private-assignment";
+      privateAnchorAssigned = true;
+    }
 
     const meta = document.createElement("div");
     meta.className = "mission-meta";
     const number = document.createElement("span");
-    number.textContent = `Mission ${String(index + 1).padStart(2, "0")}`;
+    number.textContent = mission.privateAssignment ? "Private assignment" : `Mission ${String(index + 1).padStart(2, "0")}`;
     const status = document.createElement("span");
     status.className = "mission-status";
     status.textContent = mission.completed ? "Completed" : "Active";
@@ -384,6 +411,14 @@ function renderMissions(missions) {
 
     const title = document.createElement("h3");
     title.textContent = mission.title;
+    if (mission.privateAssignment && !mission.completed) {
+      const privateCopy = document.createElement("p");
+      privateCopy.className = "private-assignment-copy";
+      privateCopy.textContent = "This one is for you.";
+      article.append(meta, privateCopy, title);
+    } else {
+      article.append(meta, title);
+    }
     const description = document.createElement("p");
     description.textContent = mission.description;
     const reward = document.createElement("p");
@@ -391,7 +426,7 @@ function renderMissions(missions) {
     reward.textContent = mission.completed
       ? `+${mission.keysEarned} ${mission.keysEarned === 1 ? "KEY" : "KEYS"} EARNED`
       : `${mission.keyReward} ${mission.keyReward === 1 ? "KEY" : "KEYS"}`;
-    article.append(meta, title, description, reward);
+    article.append(description, reward);
     if (!mission.completed || mission.repeatable) article.append(makeClaimForm(mission));
     return article;
   }));
@@ -477,6 +512,8 @@ function showKeyAward(transaction) {
 function showState(activeState, label) {
   Object.entries(states).forEach(([name, element]) => { element.hidden = name !== activeState; });
   gatedContent.forEach((section) => { section.hidden = activeState !== "passport"; });
+  accessSeal.hidden = true;
+  accessSeal.classList.remove("has-private-assignment");
   accessLabel.textContent = label;
 }
 
