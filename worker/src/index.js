@@ -52,6 +52,7 @@ export default {
         if (url.pathname === "/api/admin/missions/set-active") return await setMissionActive(body, env, cors);
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
+        if (url.pathname === "/api/admin/events/set-code") return await setEventCode(body, env, cors);
         if (url.pathname === "/api/admin/social-checkin/get") return await getAdminSocialCheckin(env, cors);
         if (url.pathname === "/api/admin/social-checkin/update") return await updateSocialCheckin(body, env, cors);
         if (url.pathname === "/api/admin/schedule/list") return await listAdminSchedule(env, cors);
@@ -433,12 +434,13 @@ async function createEvent(body, env, cors) {
   const title = normalizeMissionText(body.title, "Event title", 3, 100);
   const startsAt = normalizeEventDate(body.startsAt);
   const location = normalizeOptionalText(body.location, "Location", 160);
-  const checkInCodeHash = await sha256(normalizeVerificationCode(body.checkInCode));
+  const checkInCode = normalizeVerificationCode(body.checkInCode);
+  const checkInCodeHash = await sha256(checkInCode);
   try {
     await env.DB.prepare(`
-      INSERT INTO events (title, starts_at, location, check_in_code_hash, active, updated_at)
-      VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-    `).bind(title, startsAt, location, checkInCodeHash).run();
+      INSERT INTO events (title, starts_at, location, check_in_code_hash, check_in_code_display, active, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    `).bind(title, startsAt, location, checkInCodeHash, checkInCode).run();
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "That event code is already in use.");
     throw error;
@@ -448,14 +450,34 @@ async function createEvent(body, env, cors) {
 
 async function listAdminEvents(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT e.id, e.title, e.starts_at, e.location, e.active, COUNT(ea.id) AS check_in_count
+    SELECT e.id, e.title, e.starts_at, e.location, e.check_in_code_display, e.active, COUNT(ea.id) AS check_in_count
     FROM events e LEFT JOIN event_attendance ea ON ea.event_id = e.id
     GROUP BY e.id ORDER BY e.starts_at DESC, e.id DESC LIMIT 50
   `).all();
   return json({ events: (result.results || []).map((event) => ({
     eventId: Number(event.id), title: event.title, startsAt: event.starts_at,
-    location: event.location, active: Boolean(event.active), checkInCount: Number(event.check_in_count)
+    location: event.location, checkInCode: event.check_in_code_display || "",
+    active: Boolean(event.active), checkInCount: Number(event.check_in_count)
   })) }, 200, cors);
+}
+
+async function setEventCode(body, env, cors) {
+  const eventId = normalizePositiveInteger(body.eventId, "Event");
+  const checkInCode = normalizeVerificationCode(body.checkInCode);
+  const checkInCodeHash = await sha256(checkInCode);
+  try {
+    const result = await env.DB.prepare(`
+      UPDATE events
+      SET check_in_code_hash = ?, check_in_code_display = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? RETURNING id
+    `).bind(checkInCodeHash, checkInCode, eventId).first();
+    if (!result) throw new HttpError(404, "Event not found.");
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (String(error).includes("UNIQUE")) throw new HttpError(409, "That event code is already in use.");
+    throw error;
+  }
+  return json({ status: "updated", checkInCode }, 200, cors);
 }
 
 async function checkInEvent(body, env, cors) {
@@ -523,30 +545,31 @@ async function claimMilestone(body, env, cors) {
 
 async function listMilestoneCodes(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT code, title, description, claim_code_hash IS NOT NULL AS code_configured
+    SELECT code, title, description, claim_code_display, claim_code_hash IS NOT NULL AS code_configured
     FROM milestones WHERE claimable_by_code = 1 AND active = 1 ORDER BY sort_order, id
   `).all();
   return json({ milestones: (result.results || []).map((milestone) => ({
     code: milestone.code, title: milestone.title, description: milestone.description,
-    codeConfigured: Boolean(milestone.code_configured)
+    claimCode: milestone.claim_code_display || "", codeConfigured: Boolean(milestone.code_configured)
   })) }, 200, cors);
 }
 
 async function setMilestoneCode(body, env, cors) {
   const milestoneCode = String(body.milestoneCode || "").trim();
-  const claimCodeHash = await sha256(normalizeVerificationCode(body.claimCode));
+  const claimCode = normalizeVerificationCode(body.claimCode);
+  const claimCodeHash = await sha256(claimCode);
   try {
     const result = await env.DB.prepare(`
-      UPDATE milestones SET claim_code_hash = ?
+      UPDATE milestones SET claim_code_hash = ?, claim_code_display = ?
       WHERE code = ? AND claimable_by_code = 1 AND active = 1 RETURNING id
-    `).bind(claimCodeHash, milestoneCode).first();
+    `).bind(claimCodeHash, claimCode, milestoneCode).first();
     if (!result) throw new HttpError(404, "Milestone not found.");
   } catch (error) {
     if (error instanceof HttpError) throw error;
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "That code is already assigned to another milestone.");
     throw error;
   }
-  return json({ status: "updated" }, 200, cors);
+  return json({ status: "updated", claimCode }, 200, cors);
 }
 
 function toAdminMission(mission) {
