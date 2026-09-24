@@ -101,10 +101,12 @@
 }
 
 .passport-heading {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 2rem;
+  padding-top: 1.4rem;
 }
 
 .passport-heading h2 span {
@@ -579,6 +581,9 @@
   color: var(--gold);
 }
 
+.signals-section{padding:1rem clamp(1rem,5vw,4rem) 4rem}.signals-container{width:min(1120px,100%);margin:0 auto;border:1px solid rgba(248,40,136,.34);border-radius:1.4rem;padding:clamp(1.3rem,4vw,2.5rem);background:radial-gradient(circle at 90% 0,rgba(248,40,136,.13),transparent 18rem),rgba(255,255,255,.018)}.signals-heading{display:flex;align-items:end;justify-content:space-between;gap:1rem}.signals-heading h2{margin:.35rem 0 0;font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(2.5rem,6vw,4.2rem)}.relay-identity{border:1px solid rgba(217,181,109,.35);border-radius:1rem;padding:.75rem 1rem;text-align:center}.relay-identity span,.relay-identity strong{display:block}.relay-identity span{color:var(--muted);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase}.relay-identity strong{margin-top:.25rem;color:var(--gold);font-size:1.2rem;letter-spacing:.16em}.signals-empty{margin-top:1.5rem}.signals-empty p{margin:0;color:var(--muted)}.signals-grid{display:grid;gap:1rem;margin-top:1.5rem}.signal-card{border:1px solid rgba(217,181,109,.36);border-radius:1.2rem;padding:clamp(1.25rem,4vw,2rem);background:linear-gradient(145deg,rgba(45,26,42,.76),rgba(15,12,17,.9))}.signal-status{margin:0;color:var(--rose-soft);font-size:.72rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase}.signal-card h3{margin:.75rem 0 .35rem;font:600 clamp(2rem,5vw,3.2rem)/1 "Cormorant Garamond",Georgia,serif}.signal-card>p:not(.signal-status){color:var(--muted)}.signal-relay-form{display:grid;gap:.75rem;max-width:420px;margin-top:1.25rem}.signal-relay-form label{display:grid;gap:.45rem;color:var(--gold);font-size:.68rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase}.signal-relay-form input{border:1px solid rgba(217,181,109,.35);border-radius:.75rem;padding:.8rem;color:var(--ivory);background:rgba(255,255,255,.04);font:inherit;text-transform:uppercase}.signal-confirmation{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-top:1.2rem}.signal-confirmation p{flex-basis:100%;margin:0;color:var(--ivory);font-weight:600}.signal-cancel{border:0;padding:.65rem;color:var(--muted);background:transparent;cursor:pointer;font:inherit}.signal-cancel:hover{color:var(--ivory)}
+.member-relay-identity{position:absolute;top:0;right:0;margin:0!important;color:var(--muted)!important;font-size:.58rem;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}.member-relay-identity strong{margin-left:.3rem;color:var(--gold);font-size:.68rem;letter-spacing:.14em}
+
 .mission-card.mission-completed {
   border-color: rgba(217, 181, 109, 0.5);
   background:
@@ -617,8 +622,10 @@
 }
 
 @media (max-width: 640px) {
+  .signals-heading{align-items:flex-start;flex-direction:column}.relay-identity{width:100%;text-align:left}
   .passport-heading {
     grid-template-columns: 1fr;
+    padding-top: 1.8rem;
   }
 
   .passport-monogram {

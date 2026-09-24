@@ -7,7 +7,7 @@
   <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex" />
   <meta name="referrer" content="no-referrer" />
   <meta name="theme-color" content="#09070b" />
-  <title>JustBaila Inner Circle</title>
+  <title>JustBaila Underground</title>
   <link rel="icon" type="image/png" href="../justbaila.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,7 +17,7 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#member-content">Skip to member content</a>
+  <a class="skip-link" href="#member-content">Skip to the Underground</a>
 
   <header class="private-header">
     <a href="../index.html" class="private-brand" aria-label="Return to the JustBaila main site">
@@ -31,21 +31,21 @@
       <div class="glow glow-one" aria-hidden="true"></div>
       <div class="glow glow-two" aria-hidden="true"></div>
       <div class="hero-inner">
-        <p class="eyebrow">JustBaila · Inner Circle</p>
+        <p class="eyebrow">JustBaila Underground</p>
         <h1 id="after-dark-title">Welcome to the <span>inner circle.</span></h1>
         <div class="access-seal" id="access-seal" aria-live="polite">
           <span class="seal-dot" aria-hidden="true"></span>
-          <span id="access-label">Checking your card</span>
+          <span id="access-label">Following the signal</span>
         </div>
       </div>
     </section>
 
-    <section class="passport-section" aria-labelledby="passport-title">
+    <section class="passport-section" aria-label="Underground access">
       <div class="passport-shell">
         <div class="passport-state" id="loading-state">
-          <p class="section-kicker">One moment</p>
-          <h2 id="passport-title">Opening your passport…</h2>
-          <p>We’re securely checking this Inner Circle card.</p>
+          <p class="section-kicker">Following the signal</p>
+          <h2 id="passport-title">Entering the Underground…</h2>
+          <p>We’re securely checking your card.</p>
         </div>
 
         <div class="passport-state" id="invalid-state" hidden>
@@ -55,20 +55,20 @@
         </div>
 
         <div class="passport-state" id="error-state" hidden>
-          <p class="section-kicker">Please try again</p>
-          <h2>We couldn’t open the Inner Circle.</h2>
+          <p class="section-kicker">Signal lost</p>
+          <h2>We couldn’t reach the Underground.</h2>
           <p id="error-message">The service is temporarily unavailable.</p>
           <button class="member-button" id="retry-button" type="button">Try again</button>
         </div>
 
         <div class="passport-state claim-state" id="claim-state" hidden>
-          <p class="section-kicker">Your invitation is valid</p>
-          <h2>Activate your passport.</h2>
-          <p>This card is unclaimed. Enter the name you would like displayed on your Inner Circle passport.</p>
+          <p class="section-kicker">Access detected</p>
+          <h2>The Underground is open.</h2>
+          <p>Your access card has been recognized. Enter the name you would like other members to see.</p>
           <form class="claim-form" id="claim-form">
-            <label for="member-name">Member name</label>
+            <label for="member-name">Name in the Underground</label>
             <input id="member-name" name="memberName" type="text" minlength="2" maxlength="80" autocomplete="name" required />
-            <button class="member-button" type="submit">Claim my passport</button>
+            <button class="member-button" type="submit">Enter the Underground</button>
             <p class="form-message" id="claim-message" aria-live="polite"></p>
           </form>
         </div>
@@ -76,13 +76,14 @@
         <div class="passport-state" id="passport-state" hidden>
           <div class="passport-heading">
             <div>
-              <p class="section-kicker">Passport active</p>
+              <p class="section-kicker">Access granted</p>
               <h2>Welcome, <span id="passport-name"></span>.</h2>
-              <p>Inner Circle card <span id="passport-card-number"></span> · Activated <span id="passport-activation-date"></span></p>
+              <p>Access card <span id="passport-card-number"></span> · Access since <span id="passport-activation-date"></span></p>
+              <p class="member-relay-identity">Relay code <strong id="member-relay-code">------</strong></p>
             </div>
             <div class="passport-monogram" aria-hidden="true" id="passport-monogram">JB</div>
           </div>
-          <div class="passport-stats" aria-label="Passport activity">
+          <div class="passport-stats" aria-label="Underground activity">
             <div><strong id="attendance-count">0</strong><span>Events</span></div>
             <div><strong id="milestone-count">0</strong><span>Milestones</span></div>
             <div><strong id="mission-count">0</strong><span>Missions</span></div>
@@ -92,11 +93,18 @@
       </div>
     </section>
 
+    <section class="signals-section gated-content" aria-labelledby="signals-title" hidden>
+      <div class="signals-container">
+        <div class="signals-heading"><div><p class="section-kicker">Underground signals</p><h2 id="signals-title">Signals</h2></div></div>
+        <div class="signals-grid" id="signals-grid"></div>
+      </div>
+    </section>
+
     <section class="event-checkin gated-content" aria-labelledby="event-checkin-title" hidden>
       <div class="event-checkin-card">
         <div>
           <p class="section-kicker">Social check-in</p>
-          <h2 id="event-checkin-title">Add an event to your passport.</h2>
+          <h2 id="event-checkin-title">Log tonight’s event.</h2>
           <p>Enter the unique code shared at tonight’s social. Each event can be added once.</p>
         </div>
         <form id="event-checkin-form">
@@ -129,20 +137,11 @@
       </div>
     </section>
 
-    <section class="rewards-section gated-content" aria-labelledby="rewards-title" hidden>
-      <div class="rewards-container">
-        <p class="section-kicker">The Keys exchange</p>
-        <h2 id="rewards-title">Rewards</h2>
-        <p class="rewards-intro">Spend the Keys you earn through Secret Missions. Redemptions are held for you by the JustBaila team.</p>
-        <div class="rewards-grid" id="rewards-grid"></div>
-      </div>
-    </section>
-
     <section class="milestones-section gated-content" aria-labelledby="milestones-title" hidden>
       <div class="milestones-container">
-        <p class="section-kicker">Passport achievements</p>
+        <p class="section-kicker">Underground achievements</p>
         <h2 id="milestones-title">Milestones</h2>
-        <p class="milestones-intro">Your place in the Inner Circle grows with every social, mission, and Key.</p>
+        <p class="milestones-intro">Every social, mission, and Key reveals more beneath the surface.</p>
         <form class="milestone-claim" id="milestone-claim-form">
           <label for="milestone-claim-code">Have a milestone code?</label>
           <div><input id="milestone-claim-code" name="claimCode" minlength="4" maxlength="40" autocomplete="off" placeholder="Enter your code" required /><button type="submit">Claim milestone</button></div>
@@ -151,12 +150,21 @@
         <div class="milestones-grid" id="milestones-grid"></div>
       </div>
     </section>
+
+    <section class="rewards-section gated-content" aria-labelledby="rewards-title" hidden>
+      <div class="rewards-container">
+        <p class="section-kicker">The Keys exchange</p>
+        <h2 id="rewards-title">Rewards</h2>
+        <p class="rewards-intro">Spend the Keys you earn through Secret Missions. Redemptions are held for you by the JustBaila team.</p>
+        <div class="rewards-grid" id="rewards-grid"></div>
+      </div>
+    </section>
   </main>
 
   <div class="key-award" id="key-award" role="status" aria-live="polite" hidden></div>
 
   <footer class="private-footer">
-    <p>This page is intended for invited JustBaila guests.</p>
+    <p>The Underground exists just beneath the surface of JustBaila.</p>
     <a href="../index.html">Return to JustBaila</a>
   </footer>
 </body>

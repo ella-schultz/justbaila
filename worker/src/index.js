@@ -1,5 +1,6 @@
 const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
+const RELAY_CODE_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_ATTEMPTS = 40;
 
@@ -41,6 +42,14 @@ export default {
         await enforceRateLimit(request, env);
         return await redeemReward(await readJson(request), env, cors);
       }
+      if (request.method === "POST" && url.pathname === "/api/signals/recipient") {
+        await enforceRateLimit(request, env);
+        return await resolveSignalRecipient(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/signals/relay") {
+        await enforceRateLimit(request, env);
+        return await relaySignal(await readJson(request), env, cors);
+      }
       if (request.method === "GET" && url.pathname === "/api/public/schedule") {
         return await getPublicSchedule(env, cors);
       }
@@ -54,11 +63,14 @@ export default {
         if (url.pathname === "/api/admin/missions/list") return await listAdminMissions(env, cors);
         if (url.pathname === "/api/admin/missions/update") return await updateMission(body, env, cors);
         if (url.pathname === "/api/admin/missions/set-active") return await setMissionActive(body, env, cors);
+        if (url.pathname === "/api/admin/missions/set-code") return await setMissionCode(body, env, cors);
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
         if (url.pathname === "/api/admin/events/set-code") return await setEventCode(body, env, cors);
         if (url.pathname === "/api/admin/social-checkin/get") return await getAdminSocialCheckin(env, cors);
         if (url.pathname === "/api/admin/social-checkin/update") return await updateSocialCheckin(body, env, cors);
+        if (url.pathname === "/api/admin/signals/visibility/get") return await getAdminSignalsVisibility(env, cors);
+        if (url.pathname === "/api/admin/signals/visibility/update") return await updateSignalsVisibility(body, env, cors);
         if (url.pathname === "/api/admin/schedule/list") return await listAdminSchedule(env, cors);
         if (url.pathname === "/api/admin/schedule/create") return await createScheduleEntry(body, env, cors);
         if (url.pathname === "/api/admin/schedule/update") return await updateScheduleEntry(body, env, cors);
@@ -77,13 +89,17 @@ export default {
         if (url.pathname === "/api/admin/rewards/fulfill") return await fulfillReward(body, env, cors);
         if (url.pathname === "/api/admin/invitation/get") return await getAdminInvitation(env, cors);
         if (url.pathname === "/api/admin/invitation/update") return await updateInvitation(body, env, cors);
+        if (url.pathname === "/api/admin/signals/create") return await createSignal(body, env, cors);
+        if (url.pathname === "/api/admin/signals/list") return await listAdminSignals(env, cors);
+        if (url.pathname === "/api/admin/signals/details") return await getAdminSignal(body, env, cors);
+        if (url.pathname === "/api/admin/signals/retire") return await retireSignal(body, env, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/health") return json({ status: "ok" }, 200, cors);
       return json({ error: "Not found." }, 404, cors);
     } catch (error) {
       if (error instanceof HttpError) return json({ error: error.message }, error.status, cors);
       console.error("Inner Circle API error", error);
-      return json({ error: "The Inner Circle is temporarily unavailable." }, 500, cors);
+      return json({ error: "The Underground is temporarily unavailable." }, 500, cors);
     }
   }
 };
@@ -133,7 +149,8 @@ async function getPassportByHash(cardHash, env) {
 
 async function buildPublicPassport(passport, env) {
   await evaluateMilestones(passport.passport_id, env);
-  const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult] = await Promise.all([
+  const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
+  const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult] = await Promise.all([
     env.DB.prepare(`
       SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
@@ -149,28 +166,34 @@ async function buildPublicPassport(passport, env) {
       WHERE passport_id = ? AND amount > 0 ORDER BY created_at DESC, id DESC LIMIT 1
     `).bind(passport.passport_id).first(),
     env.DB.prepare(`
-      SELECT m.code, m.title, m.description, m.criteria_type, m.threshold, m.claimable_by_code, m.member_claimable,
+      SELECT m.code, m.title, m.description, m.reveal_text, m.criteria_type, m.threshold, m.claimable_by_code, m.member_claimable,
         pm.achieved_at
       FROM milestones m
       LEFT JOIN passport_milestones pm ON pm.milestone_id = m.id AND pm.passport_id = ?
-      WHERE m.active = 1
+      WHERE m.active = 1 AND (m.hidden_until_achieved = 0 OR pm.achieved_at IS NOT NULL)
       ORDER BY m.sort_order, m.id
     `).bind(passport.passport_id).all(),
     env.DB.prepare(`
-      SELECT kicker, title, description, button_label, button_url, social_checkin_visible, updated_at
+      SELECT kicker, title, description, button_label, button_url, social_checkin_visible, signals_visible, updated_at
       FROM invitation_settings WHERE id = 1
     `).first(),
     env.DB.prepare(`
       SELECT r.code, r.name AS title, r.description, r.key_cost,
         EXISTS(SELECT 1 FROM reward_redemptions rr WHERE rr.reward_id = r.id AND rr.passport_id = ? AND rr.status = 'requested') AS pending
       FROM rewards r WHERE r.active = 1 ORDER BY r.sort_order, r.id
+    `).bind(passport.passport_id).all(),
+    env.DB.prepare(`
+      SELECT s.public_code, COALESCE(NULLIF(s.title, ''), st.name) AS title, st.code AS type, s.created_at, s.last_relayed_at
+      FROM signals s JOIN signal_types st ON st.id = s.signal_type_id
+      WHERE s.current_holder_id = ? AND s.status = 'active'
+      ORDER BY COALESCE(s.last_relayed_at, s.created_at) DESC
     `).bind(passport.passport_id).all()
   ]);
 
   const milestones = (milestonesResult.results || []).map((milestone) => ({
     code: milestone.code,
     title: milestone.title,
-    description: milestone.description,
+    description: milestone.achieved_at && milestone.reveal_text ? milestone.reveal_text : milestone.description,
     criteriaType: milestone.criteria_type,
     threshold: Number(milestone.threshold || 0),
     claimableByCode: Boolean(milestone.claimable_by_code),
@@ -187,7 +210,15 @@ async function buildPublicPassport(passport, env) {
     milestoneCount: milestones.filter((milestone) => milestone.achieved).length,
     missionCount: Number(passport.mission_count || 0),
     keyBalance: Number(passport.key_balance || 0),
+    relayCode,
+    signals: (signalsResult.results || []).map((signal) => ({
+      code: signal.public_code,
+      title: signal.title,
+      type: signal.type,
+      receivedAt: signal.last_relayed_at || signal.created_at
+    })),
     socialCheckinVisible: Boolean(invitation?.social_checkin_visible),
+    signalsVisible: Boolean(invitation?.signals_visible),
     invitation: invitation ? {
       kicker: invitation.kicker,
       title: invitation.title,
@@ -223,6 +254,175 @@ async function buildPublicPassport(passport, env) {
   };
 }
 
+async function ensureMemberRelayCode(passportId, env) {
+  const existing = await env.DB.prepare(`SELECT code_display FROM member_relay_codes WHERE passport_id = ? LIMIT 1`).bind(passportId).first();
+  if (existing) return existing.code_display;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const code = randomCode(6);
+    try {
+      await env.DB.prepare(`INSERT INTO member_relay_codes (passport_id, code_hash, code_display) VALUES (?, ?, ?)`).bind(passportId, await sha256(code), code).run();
+      return code;
+    } catch (error) {
+      const created = await env.DB.prepare(`SELECT code_display FROM member_relay_codes WHERE passport_id = ? LIMIT 1`).bind(passportId).first();
+      if (created) return created.code_display;
+    }
+  }
+  throw new HttpError(503, "A relay code could not be created. Please try again.");
+}
+
+async function resolveSignalRecipient(body, env, cors) {
+  const sender = await getClaimedPassportFromCard(body.cardId, env);
+  const signal = await getHeldSignal(body.signalCode, sender.passport_id, env);
+  const relayCode = normalizeRelayCode(body.relayCode);
+  const recipient = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name FROM member_relay_codes mrc
+    JOIN passports p ON p.id = mrc.passport_id
+    WHERE mrc.code_hash = ? AND p.status = 'claimed' LIMIT 1
+  `).bind(await sha256(relayCode)).first();
+  if (!recipient) throw new HttpError(404, "That member code was not recognized.");
+  if (Number(recipient.passport_id) === Number(sender.passport_id)) throw new HttpError(409, "A Signal cannot be relayed back to yourself.");
+  return json({ signal: { code: signal.public_code, title: signal.title }, recipient: { name: recipient.member_name, relayCode } }, 200, cors);
+}
+
+async function relaySignal(body, env, cors) {
+  const sender = await getClaimedPassportFromCard(body.cardId, env);
+  const signalCode = String(body.signalCode || "").trim().toUpperCase();
+  const relayCode = normalizeRelayCode(body.relayCode);
+  const idempotencyKey = String(body.idempotencyKey || "").trim();
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) throw new HttpError(400, "Invalid relay request.");
+  const recipient = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name FROM member_relay_codes mrc
+    JOIN passports p ON p.id = mrc.passport_id
+    WHERE mrc.code_hash = ? AND p.status = 'claimed' LIMIT 1
+  `).bind(await sha256(relayCode)).first();
+  if (!recipient) throw new HttpError(404, "That member code was not recognized.");
+  if (Number(recipient.passport_id) === Number(sender.passport_id)) throw new HttpError(409, "A Signal cannot be relayed back to yourself.");
+
+  const signal = await env.DB.prepare(`SELECT id, current_holder_id, status FROM signals WHERE public_code = ? LIMIT 1`).bind(signalCode).first();
+  if (!signal || signal.status !== "active") throw new HttpError(404, "That Signal is no longer active.");
+  const prior = await env.DB.prepare(`SELECT signal_id, sender_passport_id, recipient_passport_id FROM signal_relays WHERE idempotency_key = ? LIMIT 1`).bind(idempotencyKey).first();
+  if (prior) {
+    if (prior.signal_id !== signal.id || Number(prior.sender_passport_id) !== Number(sender.passport_id) || Number(prior.recipient_passport_id) !== Number(recipient.passport_id)) throw new HttpError(409, "That relay request has already been used.");
+    return json({ status: "relayed", message: "SIGNAL RELAYED", passport: await buildPublicPassport(sender, env) }, 200, cors);
+  }
+
+  const relayId = `relay_${crypto.randomUUID()}`;
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO signal_relays (id, idempotency_key, signal_id, sender_passport_id, recipient_passport_id, event_id)
+      SELECT ?, ?, s.id, ?, ?, s.event_id FROM signals s
+      WHERE s.id = ? AND s.status = 'active' AND s.current_holder_id = ?
+    `).bind(relayId, idempotencyKey, sender.passport_id, recipient.passport_id, signal.id, sender.passport_id),
+    env.DB.prepare(`
+      UPDATE signals SET current_holder_id = ?, last_relayed_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'active' AND current_holder_id = ?
+        AND EXISTS (SELECT 1 FROM signal_relays WHERE id = ?)
+    `).bind(recipient.passport_id, signal.id, sender.passport_id, relayId)
+  ]);
+  const completed = await env.DB.prepare(`SELECT id FROM signal_relays WHERE id = ? LIMIT 1`).bind(relayId).first();
+  if (!completed) throw new HttpError(409, "The Signal has already moved. Refresh to see its current location.");
+  await evaluateMilestones(sender.passport_id, env);
+  await evaluateMilestones(recipient.passport_id, env);
+  const chain = await env.DB.prepare(`
+    SELECT DISTINCT holder_id FROM (
+      SELECT original_holder_id AS holder_id FROM signals WHERE id = ?
+      UNION SELECT recipient_passport_id AS holder_id FROM signal_relays WHERE signal_id = ?
+    )
+  `).bind(signal.id, signal.id).all();
+  if ((chain.results || []).length >= 10) {
+    for (const holder of chain.results || []) await evaluateMilestones(Number(holder.holder_id), env);
+  }
+  return json({ status: "relayed", message: "SIGNAL RELAYED", recipient: { name: recipient.member_name }, passport: await buildPublicPassport(sender, env) }, 201, cors);
+}
+
+async function getClaimedPassportFromCard(rawCardId, env) {
+  const passport = await getPassportByHash(await sha256(normalizeCardId(rawCardId)), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Activate your access card first.");
+  return passport;
+}
+
+async function getHeldSignal(rawSignalCode, passportId, env) {
+  const signalCode = String(rawSignalCode || "").trim().toUpperCase();
+  const signal = await env.DB.prepare(`
+    SELECT s.id, s.public_code, COALESCE(NULLIF(s.title, ''), st.name) AS title
+    FROM signals s JOIN signal_types st ON st.id = s.signal_type_id
+    WHERE s.public_code = ? AND s.current_holder_id = ? AND s.status = 'active' LIMIT 1
+  `).bind(signalCode, passportId).first();
+  if (!signal) throw new HttpError(409, "You are no longer carrying that Signal.");
+  return signal;
+}
+
+async function createSignal(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Member");
+  const title = String(body.title || "").trim().slice(0, 100);
+  const eventId = body.eventId ? normalizePositiveInteger(body.eventId, "Event") : null;
+  const passport = await getPassportById(passportId, env);
+  if (!passport || passport.status !== "claimed") throw new HttpError(404, "Member not found.");
+  const type = await env.DB.prepare(`SELECT id FROM signal_types WHERE code = 'wandering' AND active = 1 LIMIT 1`).first();
+  const signalId = `signal_${crypto.randomUUID()}`;
+  let publicCode = "";
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    publicCode = `WS-${randomCode(6)}`;
+    try {
+      await env.DB.prepare(`
+        INSERT INTO signals (id, public_code, signal_type_id, title, original_holder_id, current_holder_id, released_by, event_id)
+        VALUES (?, ?, ?, ?, ?, ?, 'inner-circle-admin', ?)
+      `).bind(signalId, publicCode, type.id, title || null, passportId, passportId, eventId).run();
+      break;
+    } catch (error) {
+      if (attempt === 7) throw error;
+      publicCode = "";
+    }
+  }
+  return json({ status: "created", signal: await getAdminSignalRecord(signalId, env) }, 201, cors);
+}
+
+async function listAdminSignals(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT s.id, s.public_code, COALESCE(NULLIF(s.title, ''), st.name) AS title, s.status,
+      p.member_name AS current_holder, s.created_at, s.last_relayed_at,
+      (SELECT COUNT(*) FROM signal_relays sr WHERE sr.signal_id = s.id) AS relay_count,
+      (SELECT COUNT(DISTINCT holder_id) FROM (SELECT s.original_holder_id AS holder_id UNION SELECT sr.recipient_passport_id FROM signal_relays sr WHERE sr.signal_id = s.id)) AS unique_members
+    FROM signals s JOIN signal_types st ON st.id = s.signal_type_id JOIN passports p ON p.id = s.current_holder_id
+    ORDER BY s.status = 'active' DESC, COALESCE(s.last_relayed_at, s.created_at) DESC
+  `).all();
+  return json({ signals: result.results || [] }, 200, cors);
+}
+
+async function getAdminSignal(body, env, cors) {
+  const signalId = String(body.signalId || "").trim();
+  const signal = await getAdminSignalRecord(signalId, env);
+  if (!signal) throw new HttpError(404, "Signal not found.");
+  const history = await env.DB.prepare(`
+    SELECT sr.relayed_at, sender.member_name AS sender_name, recipient.member_name AS recipient_name
+    FROM signal_relays sr JOIN passports sender ON sender.id = sr.sender_passport_id
+    JOIN passports recipient ON recipient.id = sr.recipient_passport_id
+    WHERE sr.signal_id = ? ORDER BY sr.relayed_at, sr.id
+  `).bind(signalId).all();
+  return json({ signal, history: history.results || [] }, 200, cors);
+}
+
+async function getAdminSignalRecord(signalId, env) {
+  return env.DB.prepare(`
+    SELECT s.id, s.public_code, COALESCE(NULLIF(s.title, ''), st.name) AS title, st.code AS type, s.status,
+      original.member_name AS original_holder, current.member_name AS current_holder,
+      e.title AS event_title, s.created_at, s.last_relayed_at, s.retired_at,
+      (SELECT COUNT(*) FROM signal_relays sr WHERE sr.signal_id = s.id) AS relay_count,
+      (SELECT COUNT(DISTINCT holder_id) FROM (SELECT s.original_holder_id AS holder_id UNION SELECT sr.recipient_passport_id FROM signal_relays sr WHERE sr.signal_id = s.id)) AS unique_members
+    FROM signals s JOIN signal_types st ON st.id = s.signal_type_id
+    JOIN passports original ON original.id = s.original_holder_id JOIN passports current ON current.id = s.current_holder_id
+    LEFT JOIN events e ON e.id = s.event_id WHERE s.id = ? LIMIT 1
+  `).bind(signalId).first();
+}
+
+async function retireSignal(body, env, cors) {
+  const signalId = String(body.signalId || "").trim();
+  const result = await env.DB.prepare(`UPDATE signals SET status = 'retired', retired_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active' RETURNING id`).bind(signalId).first();
+  if (!result) throw new HttpError(404, "Active Signal not found.");
+  return json({ status: "retired" }, 200, cors);
+}
+
 async function redeemReward(body, env, cors) {
   const cardId = normalizeCardId(body.cardId);
   const rewardCode = String(body.rewardCode || "").trim();
@@ -230,7 +430,7 @@ async function redeemReward(body, env, cors) {
   if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) throw new HttpError(400, "Invalid redemption request.");
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
-  if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before redeeming rewards.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before redeeming rewards.");
   const reward = await env.DB.prepare(`SELECT id, name AS title, key_cost FROM rewards WHERE code = ? AND active = 1 LIMIT 1`).bind(rewardCode).first();
   if (!reward) throw new HttpError(404, "Reward not found.");
   const existing = await env.DB.prepare(`SELECT id FROM reward_redemptions WHERE id = ? LIMIT 1`).bind(idempotencyKey).first();
@@ -342,8 +542,70 @@ async function evaluateMilestones(passportId, env) {
         (m.criteria_type = 'events' AND (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = ?) >= m.threshold)
         OR (m.criteria_type = 'missions' AND (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = ?) >= m.threshold)
         OR (m.criteria_type = 'keys' AND (SELECT COALESCE(SUM(kt.amount), 0) FROM key_transactions kt WHERE kt.passport_id = ?) >= m.threshold)
+        OR (m.criteria_type = 'signal_received' AND (
+          EXISTS (SELECT 1 FROM signals s WHERE s.original_holder_id = ?)
+          OR EXISTS (SELECT 1 FROM signal_relays sr WHERE sr.recipient_passport_id = ?)
+        ))
+        OR (m.criteria_type = 'signal_sent' AND EXISTS (
+          SELECT 1 FROM signal_relays sr WHERE sr.sender_passport_id = ?
+        ))
+        OR (m.criteria_type = 'signal_full_circle' AND EXISTS (
+          SELECT 1 FROM signal_relays return_relay
+          JOIN signals s ON s.id = return_relay.signal_id
+          WHERE return_relay.recipient_passport_id = ?
+            AND (
+              s.original_holder_id = ?
+              OR EXISTS (
+                SELECT 1 FROM signal_relays prior
+                WHERE prior.signal_id = return_relay.signal_id
+                  AND prior.recipient_passport_id = ?
+                  AND prior.rowid < return_relay.rowid
+              )
+            )
+            AND 3 <= (
+              SELECT COUNT(DISTINCT earlier.recipient_passport_id)
+              FROM signal_relays earlier
+              WHERE earlier.signal_id = return_relay.signal_id
+                AND earlier.rowid < return_relay.rowid
+                AND earlier.recipient_passport_id != ?
+            ) + CASE
+              WHEN s.original_holder_id != ? AND NOT EXISTS (
+                SELECT 1 FROM signal_relays earlier_origin
+                WHERE earlier_origin.signal_id = return_relay.signal_id
+                  AND earlier_origin.rowid < return_relay.rowid
+                  AND earlier_origin.recipient_passport_id = s.original_holder_id
+              ) THEN 1 ELSE 0 END
+        ))
+        OR (m.criteria_type = 'signal_long_distance' AND EXISTS (
+          SELECT 1 FROM signals s
+          WHERE (s.original_holder_id = ? OR EXISTS (
+            SELECT 1 FROM signal_relays participation
+            WHERE participation.signal_id = s.id
+              AND (participation.sender_passport_id = ? OR participation.recipient_passport_id = ?)
+          ))
+          AND 10 <= (SELECT COUNT(DISTINCT journey.recipient_passport_id) FROM signal_relays journey WHERE journey.signal_id = s.id)
+            + CASE WHEN EXISTS (
+              SELECT 1 FROM signal_relays origin_check
+              WHERE origin_check.signal_id = s.id AND origin_check.recipient_passport_id = s.original_holder_id
+            ) THEN 0 ELSE 1 END
+        ))
+        OR (m.criteria_type = 'triple_threat'
+          AND EXISTS (SELECT 1 FROM mission_completions mc WHERE mc.passport_id = ?)
+          AND EXISTS (SELECT 1 FROM key_transactions kt WHERE kt.passport_id = ? AND kt.amount > 0)
+          AND (
+            EXISTS (SELECT 1 FROM signals s WHERE s.original_holder_id = ?)
+            OR EXISTS (SELECT 1 FROM signal_relays sr WHERE sr.sender_passport_id = ? OR sr.recipient_passport_id = ?)
+          )
+        )
       )
-  `).bind(passportId, passportId, passportId, passportId).run();
+  `).bind(
+    passportId, passportId, passportId, passportId, passportId,
+    passportId, passportId,
+    passportId,
+    passportId, passportId, passportId, passportId,
+    passportId, passportId, passportId,
+    passportId, passportId, passportId, passportId, passportId
+  ).run();
 }
 
 async function searchPassports(rawQuery, env, cors) {
@@ -438,7 +700,7 @@ async function claimMission(body, env, cors) {
 
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
-  if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before claiming missions.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before claiming missions.");
 
   const mission = await env.DB.prepare(`
     SELECT id, code, title, key_reward, repeatable, verification_required, verification_code_hash
@@ -500,23 +762,28 @@ async function createMission(body, env, cors) {
   const repeatable = body.repeatable ? 1 : 0;
   const verificationRequired = body.verificationRequired ? 1 : 0;
   let verificationCodeHash = null;
-  if (verificationRequired) verificationCodeHash = await sha256(normalizeVerificationCode(body.verificationCode));
+  let verificationCodeDisplay = null;
+  if (verificationRequired) {
+    verificationCodeDisplay = normalizeVerificationCode(body.verificationCode);
+    verificationCodeHash = await sha256(verificationCodeDisplay);
+  }
 
   const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "mission";
   const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
   const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM missions`).first();
   await env.DB.prepare(`
     INSERT INTO missions
-      (code, title, description, key_reward, repeatable, active, sort_order, verification_required, verification_code_hash, counts_as_event)
-    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 0)
-  `).bind(code, title, description, keyReward, repeatable, Number(sortResult.next_order), verificationRequired, verificationCodeHash).run();
+      (code, title, description, key_reward, repeatable, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0)
+  `).bind(code, title, description, keyReward, repeatable, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay).run();
 
   return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), verificationRequired: Boolean(verificationRequired) } }, 201, cors);
 }
 
 async function listAdminMissions(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.active,
+    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required,
+      m.verification_code_display, m.verification_code_hash IS NOT NULL AS code_configured, m.active,
       COUNT(mc.id) AS completion_count
     FROM missions m
     LEFT JOIN mission_completions mc ON mc.mission_id = m.id
@@ -528,7 +795,7 @@ async function listAdminMissions(env, cors) {
 
 async function updateMission(body, env, cors) {
   const code = String(body.code || "").trim();
-  const existing = await env.DB.prepare(`SELECT id, verification_required, verification_code_hash FROM missions WHERE code = ?`).bind(code).first();
+  const existing = await env.DB.prepare(`SELECT id, verification_required, verification_code_hash, verification_code_display FROM missions WHERE code = ?`).bind(code).first();
   if (!existing) throw new HttpError(404, "Mission not found.");
   const title = normalizeMissionText(body.title, "Mission title", 3, 80);
   const description = normalizeMissionText(body.description, "Description", 10, 500);
@@ -537,17 +804,19 @@ async function updateMission(body, env, cors) {
   const repeatable = body.repeatable ? 1 : 0;
   const verificationRequired = body.verificationRequired ? 1 : 0;
   let verificationCodeHash = existing.verification_code_hash;
+  let verificationCodeDisplay = existing.verification_code_display;
   if (verificationRequired && String(body.verificationCode || "").trim()) {
-    verificationCodeHash = await sha256(normalizeVerificationCode(body.verificationCode));
+    verificationCodeDisplay = normalizeVerificationCode(body.verificationCode);
+    verificationCodeHash = await sha256(verificationCodeDisplay);
   }
   if (verificationRequired && !verificationCodeHash) throw new HttpError(400, "Enter a verification code for this mission.");
-  if (!verificationRequired) verificationCodeHash = null;
+  if (!verificationRequired) { verificationCodeHash = null; verificationCodeDisplay = null; }
 
   await env.DB.prepare(`
     UPDATE missions SET title = ?, description = ?, key_reward = ?, repeatable = ?,
-      verification_required = ?, verification_code_hash = ?, updated_at = CURRENT_TIMESTAMP
+      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, updated_at = CURRENT_TIMESTAMP
     WHERE code = ?
-  `).bind(title, description, keyReward, repeatable, verificationRequired, verificationCodeHash, code).run();
+  `).bind(title, description, keyReward, repeatable, verificationRequired, verificationCodeHash, verificationCodeDisplay, code).run();
   return json({ status: "updated" }, 200, cors);
 }
 
@@ -559,6 +828,17 @@ async function setMissionActive(body, env, cors) {
   `).bind(active, code).first();
   if (!result) throw new HttpError(404, "Mission not found.");
   return json({ status: active ? "restored" : "archived" }, 200, cors);
+}
+
+async function setMissionCode(body, env, cors) {
+  const missionCode = String(body.missionCode || "").trim();
+  const verificationCode = normalizeVerificationCode(body.verificationCode);
+  const result = await env.DB.prepare(`
+    UPDATE missions SET verification_code_hash = ?, verification_code_display = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE code = ? AND verification_required = 1 RETURNING id
+  `).bind(await sha256(verificationCode), verificationCode, missionCode).first();
+  if (!result) throw new HttpError(404, "Code-required mission not found.");
+  return json({ status: "updated", verificationCode }, 200, cors);
 }
 
 async function createEvent(body, env, cors) {
@@ -619,7 +899,7 @@ async function checkInEvent(body, env, cors) {
   const cardId = normalizeCardId(body.cardId);
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
-  if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before checking in.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before checking in.");
   const codeHash = await sha256(normalizeVerificationCode(body.checkInCode));
   const event = await env.DB.prepare(`
     SELECT id, title FROM events WHERE check_in_code_hash = ? AND active = 1 LIMIT 1
@@ -653,11 +933,26 @@ async function updateSocialCheckin(body, env, cors) {
   return json({ visible: Boolean(visible) }, 200, cors);
 }
 
+async function getAdminSignalsVisibility(env, cors) {
+  const setting = await env.DB.prepare(`SELECT signals_visible FROM invitation_settings WHERE id = 1`).first();
+  if (!setting) throw new HttpError(404, "Signal settings were not found.");
+  return json({ visible: Boolean(setting.signals_visible) }, 200, cors);
+}
+
+async function updateSignalsVisibility(body, env, cors) {
+  const visible = normalizeBoolean(body.visible);
+  await env.DB.prepare(`
+    UPDATE invitation_settings SET signals_visible = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin'
+    WHERE id = 1
+  `).bind(visible).run();
+  return json({ visible: Boolean(visible) }, 200, cors);
+}
+
 async function claimMilestone(body, env, cors) {
   const cardId = normalizeCardId(body.cardId);
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
-  if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before claiming milestones.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before claiming milestones.");
   let milestone;
   if (body.milestoneCode) {
     const milestoneCode = String(body.milestoneCode).trim();
@@ -686,7 +981,7 @@ async function claimMilestone(body, env, cors) {
 
 async function listAdminMilestones(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT m.code, m.title, m.description, m.criteria_type, m.threshold, m.member_claimable,
+    SELECT m.code, m.title, m.description, m.reveal_text, m.criteria_type, m.threshold, m.member_claimable, m.hidden_until_achieved,
       m.claimable_by_code, m.claim_code_display, m.claim_code_hash IS NOT NULL AS code_configured,
       m.active, COUNT(pm.id) AS achievement_count
     FROM milestones m
@@ -699,7 +994,10 @@ async function listAdminMilestones(env, cors) {
 async function createMilestone(body, env, cors) {
   const title = normalizeMissionText(body.title, "Milestone title", 3, 100);
   const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const revealText = normalizeMissionText(body.revealText, "Reveal text", 3, 500);
   const requiresCode = Boolean(normalizeBoolean(body.requiresCode));
+  const hiddenUntilAchieved = Boolean(normalizeBoolean(body.hiddenUntilAchieved));
+  if (hiddenUntilAchieved && !requiresCode) throw new HttpError(400, "Secret member-claimable milestones must require a code.");
   const claimCode = requiresCode ? normalizeVerificationCode(body.claimCode) : null;
   const claimCodeHash = claimCode ? await sha256(claimCode) : null;
   const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "milestone";
@@ -708,10 +1006,10 @@ async function createMilestone(body, env, cors) {
   try {
     await env.DB.prepare(`
       INSERT INTO milestones
-        (code, title, description, criteria_type, threshold, sort_order, active, claimable_by_code,
-         claim_code_hash, claim_code_display, member_claimable)
-      VALUES (?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?, 1)
-    `).bind(code, title, description, Number(sortResult.next_order), requiresCode ? 1 : 0, claimCodeHash, claimCode).run();
+        (code, title, description, reveal_text, criteria_type, threshold, sort_order, active, claimable_by_code,
+         claim_code_hash, claim_code_display, member_claimable, hidden_until_achieved)
+      VALUES (?, ?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?, 1, ?)
+    `).bind(code, title, description, revealText, Number(sortResult.next_order), requiresCode ? 1 : 0, claimCodeHash, claimCode, hiddenUntilAchieved ? 1 : 0).run();
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "That milestone code is already in use.");
     throw error;
@@ -723,19 +1021,23 @@ async function updateMilestone(body, env, cors) {
   const code = String(body.code || "").trim();
   const title = normalizeMissionText(body.title, "Milestone title", 3, 100);
   const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const revealText = normalizeMissionText(body.revealText, "Reveal text", 3, 500);
   const existing = await env.DB.prepare(`SELECT member_claimable FROM milestones WHERE code = ? LIMIT 1`).bind(code).first();
   if (!existing) throw new HttpError(404, "Milestone not found.");
   if (existing.member_claimable) {
     const requiresCode = normalizeBoolean(body.requiresCode);
+    const hiddenUntilAchieved = normalizeBoolean(body.hiddenUntilAchieved);
+    if (hiddenUntilAchieved && !requiresCode) throw new HttpError(400, "Secret member-claimable milestones must require a code.");
     await env.DB.prepare(`
       UPDATE milestones
-      SET title = ?, description = ?, claimable_by_code = ?,
+      SET title = ?, description = ?, reveal_text = ?, claimable_by_code = ?, hidden_until_achieved = ?,
         claim_code_hash = CASE WHEN ? = 0 THEN NULL ELSE claim_code_hash END,
         claim_code_display = CASE WHEN ? = 0 THEN NULL ELSE claim_code_display END
       WHERE code = ?
-    `).bind(title, description, requiresCode, requiresCode, requiresCode, code).run();
+    `).bind(title, description, revealText, requiresCode, hiddenUntilAchieved, requiresCode, requiresCode, code).run();
   } else {
-    await env.DB.prepare(`UPDATE milestones SET title = ?, description = ? WHERE code = ?`).bind(title, description, code).run();
+    const hiddenUntilAchieved = normalizeBoolean(body.hiddenUntilAchieved);
+    await env.DB.prepare(`UPDATE milestones SET title = ?, description = ?, reveal_text = ?, hidden_until_achieved = ? WHERE code = ?`).bind(title, description, revealText, hiddenUntilAchieved, code).run();
   }
   return json({ status: "updated" }, 200, cors);
 }
@@ -750,9 +1052,10 @@ async function setMilestoneActive(body, env, cors) {
 
 function toAdminMilestone(milestone) {
   return {
-    code: milestone.code, title: milestone.title, description: milestone.description,
+    code: milestone.code, title: milestone.title, description: milestone.description, revealText: milestone.reveal_text || "",
     criteriaType: milestone.criteria_type, threshold: Number(milestone.threshold || 0),
     memberClaimable: Boolean(milestone.member_claimable), requiresCode: Boolean(milestone.claimable_by_code),
+    hiddenUntilAchieved: Boolean(milestone.hidden_until_achieved),
     claimCode: milestone.claim_code_display || "", codeConfigured: Boolean(milestone.code_configured),
     active: Boolean(milestone.active), achievementCount: Number(milestone.achievement_count)
   };
@@ -791,7 +1094,8 @@ function toAdminMission(mission) {
   return {
     code: mission.code, title: mission.title, description: mission.description,
     keyReward: Number(mission.key_reward), repeatable: Boolean(mission.repeatable),
-    verificationRequired: Boolean(mission.verification_required), active: Boolean(mission.active),
+    verificationRequired: Boolean(mission.verification_required), verificationCode: mission.verification_code_display || "",
+    codeConfigured: Boolean(mission.code_configured), active: Boolean(mission.active),
     completionCount: Number(mission.completion_count)
   };
 }
@@ -1013,6 +1317,18 @@ function normalizeVerificationCode(value) {
   const code = String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
   if (code.length < 4 || code.length > 40) throw new HttpError(400, "Mission code must be between 4 and 40 characters.");
   return code;
+}
+
+function normalizeRelayCode(value) {
+  const code = String(value || "").trim().toUpperCase();
+  if (!RELAY_CODE_PATTERN.test(code)) throw new HttpError(400, "Enter the six-character relay code.");
+  return code;
+}
+
+function randomCode(length) {
+  const alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 function normalizeMissionText(value, label, minimum, maximum) {
