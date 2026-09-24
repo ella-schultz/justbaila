@@ -155,11 +155,58 @@ function renderPassport(passport) {
   document.querySelector("#mission-count").textContent = passport.missionCount;
   document.querySelector("#key-count").textContent = passport.keyBalance;
   renderInvitation(passport.invitation);
+  renderRewards(passport.rewards || [], passport.keyBalance);
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
   showState("passport", "Access confirmed");
   eventCheckinSection.hidden = !passport.socialCheckinVisible;
   showKeyAward(passport.latestKeyTransaction);
+}
+
+function renderRewards(rewards, keyBalance) {
+  const grid = document.querySelector("#rewards-grid");
+  grid.replaceChildren(...rewards.map((reward) => {
+    const article = document.createElement("article");
+    const affordable = keyBalance >= reward.keyCost;
+    article.className = `reward-card${affordable ? " reward-unlocked" : ""}${reward.pending ? " reward-pending" : ""}`;
+    const cost = document.createElement("p");
+    cost.className = "reward-cost";
+    cost.textContent = `${reward.keyCost} Keys`;
+    const title = document.createElement("h3");
+    title.textContent = reward.title;
+    const description = document.createElement("p");
+    description.textContent = reward.description;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = !affordable || reward.pending;
+    button.textContent = reward.pending ? "Redemption pending" : affordable ? "Redeem reward" : `${reward.keyCost - keyBalance} more Keys`;
+    const message = document.createElement("p");
+    message.className = "form-message";
+    button.addEventListener("click", () => redeemReward(reward, button, message));
+    article.append(cost, title, description, button, message);
+    return article;
+  }));
+}
+
+async function redeemReward(reward, button, message) {
+  if (!window.confirm(`Redeem ${reward.keyCost} Keys for “${reward.title}”?`)) return;
+  button.disabled = true;
+  button.textContent = "Redeeming…";
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/rewards/redeem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, rewardCode: reward.code, idempotencyKey: crypto.randomUUID().replaceAll("-", "") })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "We couldn’t redeem this reward.");
+    renderPassport(result.passport);
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "Redeem reward";
+  }
 }
 
 function renderInvitation(invitation) {
@@ -191,14 +238,45 @@ function renderMilestones(milestones) {
     seal.textContent = milestone.achieved ? "✓" : "◇";
     const status = document.createElement("p");
     status.className = "milestone-status";
-    status.textContent = milestone.achieved ? "Achieved" : milestone.claimableByCode ? "Code required" : "Locked";
+    status.textContent = milestone.achieved ? "Achieved" : milestone.claimableByCode ? "Code required" : milestone.memberClaimable ? "Honor claim" : "Locked";
     const title = document.createElement("h3");
     title.textContent = milestone.title;
     const description = document.createElement("p");
+    description.className = "milestone-description";
     description.textContent = milestone.description;
     article.append(seal, status, title, description);
+    if (milestone.memberClaimable && !milestone.claimableByCode && !milestone.achieved) {
+      const button = document.createElement("button");
+      button.className = "milestone-claim-button";
+      button.type = "button";
+      button.textContent = "Claim milestone";
+      const message = document.createElement("p");
+      message.className = "form-message";
+      button.addEventListener("click", () => claimMilestoneDirect(milestone, button, message));
+      article.append(button, message);
+    }
     return article;
   }));
+}
+
+async function claimMilestoneDirect(milestone, button, message) {
+  button.disabled = true;
+  button.textContent = "Claiming…";
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/milestones/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, milestoneCode: milestone.code })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "We couldn’t claim this milestone.");
+    renderPassport(result.passport);
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "Claim milestone";
+  }
 }
 
 function renderMissions(missions) {

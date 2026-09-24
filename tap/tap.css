@@ -163,6 +163,89 @@
   padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
 }
 
+.rewards-section {
+  padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
+}
+
+.rewards-container {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.rewards-container h2 {
+  margin-top: 0.5rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.6rem, 6vw, 4.7rem);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.rewards-intro {
+  max-width: 680px;
+  color: var(--muted);
+}
+
+.rewards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.reward-card {
+  display: flex;
+  min-height: 270px;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 1.1rem;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.018);
+  opacity: 0.58;
+}
+
+.reward-card.reward-unlocked {
+  border-color: rgba(217, 181, 109, 0.52);
+  background: radial-gradient(circle at top right, rgba(217, 181, 109, 0.12), transparent 8rem), rgba(255, 255, 255, 0.025);
+  opacity: 1;
+}
+
+.reward-cost {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reward-card h3 {
+  margin: 0.65rem 0;
+  font: 600 1.45rem/1.05 "Cormorant Garamond", Georgia, serif;
+}
+
+.reward-card > p:nth-of-type(2) {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.reward-card button {
+  margin-top: auto;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 0.7rem 0.8rem;
+  color: var(--gold);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.reward-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .event-checkin {
   padding: 0 1.25rem clamp(5rem, 9vw, 8rem);
 }
@@ -332,10 +415,29 @@
   line-height: 1.05;
 }
 
-.milestone-card > p:last-child {
+.milestone-description {
   margin-top: 0.7rem;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.milestone-claim-button {
+  margin-top: auto;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 0.7rem 0.9rem;
+  color: var(--gold);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.milestone-claim-button:hover,
+.milestone-claim-button:focus-visible {
+  color: var(--ivory);
+  border-color: var(--ivory);
 }
 
 .missions-container {
@@ -540,6 +642,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .rewards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .milestone-claim > div {
     grid-template-columns: 1fr;
   }
@@ -550,5 +656,11 @@
 
   .mission-card h3 {
     margin-top: 2.5rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .rewards-grid {
+    grid-template-columns: 1fr;
   }
 }

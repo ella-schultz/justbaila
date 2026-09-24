@@ -37,6 +37,10 @@ export default {
         await enforceRateLimit(request, env);
         return await claimMilestone(await readJson(request), env, cors);
       }
+      if (request.method === "POST" && url.pathname === "/api/rewards/redeem") {
+        await enforceRateLimit(request, env);
+        return await redeemReward(await readJson(request), env, cors);
+      }
       if (request.method === "GET" && url.pathname === "/api/public/schedule") {
         return await getPublicSchedule(env, cors);
       }
@@ -61,6 +65,16 @@ export default {
         if (url.pathname === "/api/admin/schedule/set-active") return await setScheduleEntryActive(body, env, cors);
         if (url.pathname === "/api/admin/milestones/codes") return await listMilestoneCodes(env, cors);
         if (url.pathname === "/api/admin/milestones/set-code") return await setMilestoneCode(body, env, cors);
+        if (url.pathname === "/api/admin/milestones/list") return await listAdminMilestones(env, cors);
+        if (url.pathname === "/api/admin/milestones/create") return await createMilestone(body, env, cors);
+        if (url.pathname === "/api/admin/milestones/update") return await updateMilestone(body, env, cors);
+        if (url.pathname === "/api/admin/milestones/set-active") return await setMilestoneActive(body, env, cors);
+        if (url.pathname === "/api/admin/rewards/list") return await listAdminRewards(env, cors);
+        if (url.pathname === "/api/admin/rewards/create") return await createReward(body, env, cors);
+        if (url.pathname === "/api/admin/rewards/update") return await updateReward(body, env, cors);
+        if (url.pathname === "/api/admin/rewards/set-active") return await setRewardActive(body, env, cors);
+        if (url.pathname === "/api/admin/rewards/redemptions") return await listRewardRedemptions(env, cors);
+        if (url.pathname === "/api/admin/rewards/fulfill") return await fulfillReward(body, env, cors);
         if (url.pathname === "/api/admin/invitation/get") return await getAdminInvitation(env, cors);
         if (url.pathname === "/api/admin/invitation/update") return await updateInvitation(body, env, cors);
       }
@@ -119,7 +133,7 @@ async function getPassportByHash(cardHash, env) {
 
 async function buildPublicPassport(passport, env) {
   await evaluateMilestones(passport.passport_id, env);
-  const [missionsResult, latestKeyTransaction, milestonesResult, invitation] = await Promise.all([
+  const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult] = await Promise.all([
     env.DB.prepare(`
       SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
@@ -135,7 +149,7 @@ async function buildPublicPassport(passport, env) {
       WHERE passport_id = ? AND amount > 0 ORDER BY created_at DESC, id DESC LIMIT 1
     `).bind(passport.passport_id).first(),
     env.DB.prepare(`
-      SELECT m.code, m.title, m.description, m.criteria_type, m.threshold, m.claimable_by_code,
+      SELECT m.code, m.title, m.description, m.criteria_type, m.threshold, m.claimable_by_code, m.member_claimable,
         pm.achieved_at
       FROM milestones m
       LEFT JOIN passport_milestones pm ON pm.milestone_id = m.id AND pm.passport_id = ?
@@ -145,7 +159,12 @@ async function buildPublicPassport(passport, env) {
     env.DB.prepare(`
       SELECT kicker, title, description, button_label, button_url, social_checkin_visible, updated_at
       FROM invitation_settings WHERE id = 1
-    `).first()
+    `).first(),
+    env.DB.prepare(`
+      SELECT r.code, r.name AS title, r.description, r.key_cost,
+        EXISTS(SELECT 1 FROM reward_redemptions rr WHERE rr.reward_id = r.id AND rr.passport_id = ? AND rr.status = 'requested') AS pending
+      FROM rewards r WHERE r.active = 1 ORDER BY r.sort_order, r.id
+    `).bind(passport.passport_id).all()
   ]);
 
   const milestones = (milestonesResult.results || []).map((milestone) => ({
@@ -155,6 +174,7 @@ async function buildPublicPassport(passport, env) {
     criteriaType: milestone.criteria_type,
     threshold: Number(milestone.threshold || 0),
     claimableByCode: Boolean(milestone.claimable_by_code),
+    memberClaimable: Boolean(milestone.member_claimable),
     achieved: Boolean(milestone.achieved_at),
     achievedAt: milestone.achieved_at
   }));
@@ -177,6 +197,10 @@ async function buildPublicPassport(passport, env) {
       updatedAt: invitation.updated_at
     } : null,
     milestones,
+    rewards: (rewardsResult.results || []).map((reward) => ({
+      code: reward.code, title: reward.title, description: reward.description,
+      keyCost: Number(reward.key_cost), pending: Boolean(reward.pending)
+    })),
     missions: (missionsResult.results || []).map((mission) => ({
       code: mission.code,
       title: mission.title,
@@ -197,6 +221,113 @@ async function buildPublicPassport(passport, env) {
       createdAt: latestKeyTransaction.created_at
     } : null
   };
+}
+
+async function redeemReward(body, env, cors) {
+  const cardId = normalizeCardId(body.cardId);
+  const rewardCode = String(body.rewardCode || "").trim();
+  const idempotencyKey = String(body.idempotencyKey || "").trim();
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) throw new HttpError(400, "Invalid redemption request.");
+  const passport = await getPassportByHash(await sha256(cardId), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before redeeming rewards.");
+  const reward = await env.DB.prepare(`SELECT id, name AS title, key_cost FROM rewards WHERE code = ? AND active = 1 LIMIT 1`).bind(rewardCode).first();
+  if (!reward) throw new HttpError(404, "Reward not found.");
+  const existing = await env.DB.prepare(`SELECT id FROM reward_redemptions WHERE id = ? LIMIT 1`).bind(idempotencyKey).first();
+  if (!existing) {
+    const balance = Number(passport.key_balance || 0);
+    const cost = Number(reward.key_cost);
+    if (balance < cost) throw new HttpError(409, `You need ${cost - balance} more Keys for this reward.`);
+    try {
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO reward_redemptions (id, passport_id, reward_id, keys_spent) VALUES (?, ?, ?, ?)`)
+          .bind(idempotencyKey, passport.passport_id, reward.id, cost),
+        env.DB.prepare(`INSERT INTO key_transactions
+          (id, passport_id, amount, transaction_type, reason_type, reason_id, description, created_by)
+          VALUES (?, ?, ?, 'spent', 'reward', ?, ?, 'member')`)
+          .bind(`key_${idempotencyKey}`, passport.passport_id, -cost, idempotencyKey, `Reward redeemed: ${reward.title}`)
+      ]);
+    } catch (error) {
+      if (String(error).includes("insufficient key balance")) throw new HttpError(409, "You no longer have enough Keys for this reward.");
+      if (String(error).includes("UNIQUE")) {
+        const repeatedRequest = await env.DB.prepare(`SELECT id FROM reward_redemptions WHERE id = ? LIMIT 1`).bind(idempotencyKey).first();
+        if (!repeatedRequest) throw new HttpError(409, "This reward already has a pending redemption.");
+      } else {
+        throw error;
+      }
+    }
+  }
+  const refreshed = await getPassportByHash(await sha256(cardId), env);
+  return json({ status: "requested", rewardTitle: reward.title, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
+}
+
+async function listAdminRewards(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT r.code, r.name AS title, r.description, r.key_cost, r.active,
+      COUNT(rr.id) AS redemption_count
+    FROM rewards r LEFT JOIN reward_redemptions rr ON rr.reward_id = r.id
+    GROUP BY r.id ORDER BY r.active DESC, r.sort_order, r.id
+  `).all();
+  return json({ rewards: (result.results || []).map(toAdminReward) }, 200, cors);
+}
+
+async function createReward(body, env, cors) {
+  const title = normalizeMissionText(body.title, "Reward title", 3, 100);
+  const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const keyCost = normalizeRewardCost(body.keyCost);
+  const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "reward";
+  const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+  const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM rewards`).first();
+  await env.DB.prepare(`INSERT INTO rewards (code, name, description, key_cost, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
+    .bind(code, title, description, keyCost, Number(sortResult.next_order)).run();
+  return json({ status: "created", code }, 201, cors);
+}
+
+async function updateReward(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const title = normalizeMissionText(body.title, "Reward title", 3, 100);
+  const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const keyCost = normalizeRewardCost(body.keyCost);
+  const result = await env.DB.prepare(`UPDATE rewards SET name = ?, description = ?, key_cost = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`)
+    .bind(title, description, keyCost, code).first();
+  if (!result) throw new HttpError(404, "Reward not found.");
+  return json({ status: "updated" }, 200, cors);
+}
+
+async function setRewardActive(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const active = normalizeBoolean(body.active);
+  const result = await env.DB.prepare(`UPDATE rewards SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`).bind(active, code).first();
+  if (!result) throw new HttpError(404, "Reward not found.");
+  return json({ status: active ? "restored" : "archived" }, 200, cors);
+}
+
+async function listRewardRedemptions(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT rr.id, rr.keys_spent, rr.status, rr.redeemed_at, rr.fulfilled_at,
+      r.name AS reward_title, p.member_name, c.card_number
+    FROM reward_redemptions rr
+    JOIN rewards r ON r.id = rr.reward_id
+    JOIN passports p ON p.id = rr.passport_id
+    JOIN cards c ON c.id = p.card_id
+    ORDER BY CASE rr.status WHEN 'requested' THEN 0 ELSE 1 END, rr.redeemed_at DESC LIMIT 100
+  `).all();
+  return json({ redemptions: result.results || [] }, 200, cors);
+}
+
+async function fulfillReward(body, env, cors) {
+  const id = String(body.id || "").trim();
+  const result = await env.DB.prepare(`
+    UPDATE reward_redemptions SET status = 'fulfilled', fulfilled_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'requested' RETURNING id
+  `).bind(id).first();
+  if (!result) throw new HttpError(404, "Pending redemption not found.");
+  return json({ status: "fulfilled" }, 200, cors);
+}
+
+function toAdminReward(reward) {
+  return { code: reward.code, title: reward.title, description: reward.description,
+    keyCost: Number(reward.key_cost), active: Boolean(reward.active), redemptionCount: Number(reward.redemption_count) };
 }
 
 async function evaluateMilestones(passportId, env) {
@@ -527,12 +658,22 @@ async function claimMilestone(body, env, cors) {
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
   if (passport.status !== "claimed") throw new HttpError(403, "Activate this passport before claiming milestones.");
-  const codeHash = await sha256(normalizeVerificationCode(body.claimCode));
-  const milestone = await env.DB.prepare(`
-    SELECT id, title FROM milestones
-    WHERE claim_code_hash = ? AND claimable_by_code = 1 AND active = 1 LIMIT 1
-  `).bind(codeHash).first();
-  if (!milestone) throw new HttpError(404, "Milestone code not recognized.");
+  let milestone;
+  if (body.milestoneCode) {
+    const milestoneCode = String(body.milestoneCode).trim();
+    milestone = await env.DB.prepare(`
+      SELECT id, title FROM milestones
+      WHERE code = ? AND member_claimable = 1 AND claimable_by_code = 0 AND active = 1 LIMIT 1
+    `).bind(milestoneCode).first();
+    if (!milestone) throw new HttpError(404, "Milestone is not available for direct claiming.");
+  } else {
+    const codeHash = await sha256(normalizeVerificationCode(body.claimCode));
+    milestone = await env.DB.prepare(`
+      SELECT id, title FROM milestones
+      WHERE claim_code_hash = ? AND member_claimable = 1 AND claimable_by_code = 1 AND active = 1 LIMIT 1
+    `).bind(codeHash).first();
+    if (!milestone) throw new HttpError(404, "Milestone code not recognized.");
+  }
 
   const result = await env.DB.prepare(`
     INSERT INTO passport_milestones (passport_id, milestone_id) VALUES (?, ?)
@@ -543,10 +684,84 @@ async function claimMilestone(body, env, cors) {
   return json({ status: "claimed", milestoneTitle: milestone.title, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
 }
 
+async function listAdminMilestones(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT m.code, m.title, m.description, m.criteria_type, m.threshold, m.member_claimable,
+      m.claimable_by_code, m.claim_code_display, m.claim_code_hash IS NOT NULL AS code_configured,
+      m.active, COUNT(pm.id) AS achievement_count
+    FROM milestones m
+    LEFT JOIN passport_milestones pm ON pm.milestone_id = m.id
+    GROUP BY m.id ORDER BY m.active DESC, m.sort_order, m.id
+  `).all();
+  return json({ milestones: (result.results || []).map(toAdminMilestone) }, 200, cors);
+}
+
+async function createMilestone(body, env, cors) {
+  const title = normalizeMissionText(body.title, "Milestone title", 3, 100);
+  const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const requiresCode = Boolean(normalizeBoolean(body.requiresCode));
+  const claimCode = requiresCode ? normalizeVerificationCode(body.claimCode) : null;
+  const claimCodeHash = claimCode ? await sha256(claimCode) : null;
+  const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "milestone";
+  const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+  const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM milestones`).first();
+  try {
+    await env.DB.prepare(`
+      INSERT INTO milestones
+        (code, title, description, criteria_type, threshold, sort_order, active, claimable_by_code,
+         claim_code_hash, claim_code_display, member_claimable)
+      VALUES (?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?, 1)
+    `).bind(code, title, description, Number(sortResult.next_order), requiresCode ? 1 : 0, claimCodeHash, claimCode).run();
+  } catch (error) {
+    if (String(error).includes("UNIQUE")) throw new HttpError(409, "That milestone code is already in use.");
+    throw error;
+  }
+  return json({ status: "created", code }, 201, cors);
+}
+
+async function updateMilestone(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const title = normalizeMissionText(body.title, "Milestone title", 3, 100);
+  const description = normalizeMissionText(body.description, "Description", 3, 500);
+  const existing = await env.DB.prepare(`SELECT member_claimable FROM milestones WHERE code = ? LIMIT 1`).bind(code).first();
+  if (!existing) throw new HttpError(404, "Milestone not found.");
+  if (existing.member_claimable) {
+    const requiresCode = normalizeBoolean(body.requiresCode);
+    await env.DB.prepare(`
+      UPDATE milestones
+      SET title = ?, description = ?, claimable_by_code = ?,
+        claim_code_hash = CASE WHEN ? = 0 THEN NULL ELSE claim_code_hash END,
+        claim_code_display = CASE WHEN ? = 0 THEN NULL ELSE claim_code_display END
+      WHERE code = ?
+    `).bind(title, description, requiresCode, requiresCode, requiresCode, code).run();
+  } else {
+    await env.DB.prepare(`UPDATE milestones SET title = ?, description = ? WHERE code = ?`).bind(title, description, code).run();
+  }
+  return json({ status: "updated" }, 200, cors);
+}
+
+async function setMilestoneActive(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const active = normalizeBoolean(body.active);
+  const result = await env.DB.prepare(`UPDATE milestones SET active = ? WHERE code = ? RETURNING id`).bind(active, code).first();
+  if (!result) throw new HttpError(404, "Milestone not found.");
+  return json({ status: active ? "restored" : "archived" }, 200, cors);
+}
+
+function toAdminMilestone(milestone) {
+  return {
+    code: milestone.code, title: milestone.title, description: milestone.description,
+    criteriaType: milestone.criteria_type, threshold: Number(milestone.threshold || 0),
+    memberClaimable: Boolean(milestone.member_claimable), requiresCode: Boolean(milestone.claimable_by_code),
+    claimCode: milestone.claim_code_display || "", codeConfigured: Boolean(milestone.code_configured),
+    active: Boolean(milestone.active), achievementCount: Number(milestone.achievement_count)
+  };
+}
+
 async function listMilestoneCodes(env, cors) {
   const result = await env.DB.prepare(`
     SELECT code, title, description, claim_code_display, claim_code_hash IS NOT NULL AS code_configured
-    FROM milestones WHERE claimable_by_code = 1 AND active = 1 ORDER BY sort_order, id
+    FROM milestones WHERE member_claimable = 1 AND claimable_by_code = 1 AND active = 1 ORDER BY sort_order, id
   `).all();
   return json({ milestones: (result.results || []).map((milestone) => ({
     code: milestone.code, title: milestone.title, description: milestone.description,
@@ -561,7 +776,7 @@ async function setMilestoneCode(body, env, cors) {
   try {
     const result = await env.DB.prepare(`
       UPDATE milestones SET claim_code_hash = ?, claim_code_display = ?
-      WHERE code = ? AND claimable_by_code = 1 AND active = 1 RETURNING id
+      WHERE code = ? AND member_claimable = 1 AND claimable_by_code = 1 AND active = 1 RETURNING id
     `).bind(claimCodeHash, claimCode, milestoneCode).first();
     if (!result) throw new HttpError(404, "Milestone not found.");
   } catch (error) {
@@ -774,6 +989,12 @@ function normalizeMemberName(value) {
 function normalizePositiveInteger(value, label) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < 1) throw new HttpError(400, `${label} is invalid.`);
+  return number;
+}
+
+function normalizeRewardCost(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 5 || number > 10000) throw new HttpError(400, "Reward cost must be between 5 and 10,000 Keys.");
   return number;
 }
 
