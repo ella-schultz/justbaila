@@ -38,9 +38,21 @@ export default {
         await enforceRateLimit(request, env);
         return await claimMilestone(await readJson(request), env, cors);
       }
+      if (request.method === "POST" && url.pathname === "/api/technique/request") {
+        await enforceRateLimit(request, env);
+        return await requestTechniqueCheck(await readJson(request), env, cors);
+      }
       if (request.method === "POST" && url.pathname === "/api/rewards/redeem") {
         await enforceRateLimit(request, env);
         return await redeemReward(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/membership/nominate") {
+        await enforceRateLimit(request, env);
+        return await submitMembershipNomination(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/membership/invite") {
+        await enforceRateLimit(request, env);
+        return await submitMembershipInvitation(await readJson(request), env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/signals/recipient") {
         await enforceRateLimit(request, env);
@@ -52,6 +64,15 @@ export default {
       }
       if (request.method === "GET" && url.pathname === "/api/public/schedule") {
         return await getPublicSchedule(env, cors);
+      }
+      if (request.method === "POST" && url.pathname.startsWith("/api/instructor/")) {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const instructor = await requireInstructorCard(body.cardId, env);
+        if (url.pathname === "/api/instructor/members") return await listInstructorMembers(env, cors);
+        if (url.pathname === "/api/instructor/technique/requests") return await listTechniqueRequests(env, cors);
+        if (url.pathname === "/api/instructor/technique/member") return await getAdminTechniqueMember(body, env, cors);
+        if (url.pathname === "/api/instructor/technique/check") return await recordTechniqueCheck(body, env, cors, instructor);
       }
       if (request.method === "POST" && url.pathname.startsWith("/api/admin/")) {
         await requireAdmin(request, env);
@@ -94,6 +115,16 @@ export default {
         if (url.pathname === "/api/admin/signals/list") return await listAdminSignals(env, cors);
         if (url.pathname === "/api/admin/signals/details") return await getAdminSignal(body, env, cors);
         if (url.pathname === "/api/admin/signals/retire") return await retireSignal(body, env, cors);
+        if (url.pathname === "/api/admin/technique/member") return await getAdminTechniqueMember(body, env, cors);
+        if (url.pathname === "/api/admin/technique/requests") return await listTechniqueRequests(env, cors);
+        if (url.pathname === "/api/admin/technique/check") return await recordTechniqueCheck(body, env, cors);
+        if (url.pathname === "/api/admin/technique/settings/get") return await getAdminTechniqueSettings(env, cors);
+        if (url.pathname === "/api/admin/technique/settings/update") return await updateTechniqueSettings(body, env, cors);
+        if (url.pathname === "/api/admin/instructors/list") return await listInstructors(env, cors);
+        if (url.pathname === "/api/admin/instructors/set") return await setInstructorRole(body, env, cors);
+        if (url.pathname === "/api/admin/membership/list") return await listMembershipRequests(env, cors);
+        if (url.pathname === "/api/admin/membership/update") return await updateMembershipRequest(body, env, cors);
+        if (url.pathname === "/api/admin/membership/available-cards") return await listAvailableInvitationCards(env, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/health") return json({ status: "ok" }, 200, cors);
       return json({ error: "Not found." }, 404, cors);
@@ -139,6 +170,7 @@ async function claimCard(rawCardId, rawMemberName, env, cors) {
 async function getPassportByHash(cardHash, env) {
   return env.DB.prepare(`
     SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date,
+      EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
       (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
       (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
       (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id) AS mission_count,
@@ -150,7 +182,10 @@ async function getPassportByHash(cardHash, env) {
 
 async function buildPublicPassport(passport, env) {
   await evaluateMilestones(passport.passport_id, env);
+  const membershipAccess = await ensureMembershipCapabilities(passport.passport_id, env);
   const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
+  const techniqueLab = await buildTechniqueLab(passport.passport_id, env, false);
+  const doorAccess = getDoorAccess(passport);
   const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult] = await Promise.all([
     env.DB.prepare(`
       SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event, m.scope,
@@ -160,9 +195,10 @@ async function buildPublicPassport(passport, env) {
       FROM missions m
       LEFT JOIN mission_completions mc ON mc.mission_id = m.id AND mc.passport_id = ?
       LEFT JOIN key_transactions kt ON kt.reason_type = 'mission' AND kt.reason_id = mc.id
-      LEFT JOIN mission_assignments ma ON ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed')
+      LEFT JOIN mission_assignments ma ON ma.mission_id = m.id AND ma.passport_id = ? AND ma.status = 'active'
       WHERE m.active = 1 AND (m.scope = 'global' OR ma.id IS NOT NULL)
-      GROUP BY m.id, ma.id ORDER BY m.sort_order, m.id
+      GROUP BY m.id, ma.id
+      ORDER BY CASE WHEN m.scope = 'individual' THEN 0 ELSE 1 END, m.sort_order, m.id
     `).bind(passport.passport_id, passport.passport_id).all(),
     env.DB.prepare(`
       SELECT id, amount, description, created_at FROM key_transactions
@@ -215,6 +251,10 @@ async function buildPublicPassport(passport, env) {
     undergroundLevel: getUndergroundLevel(Number(passport.mission_count || 0)),
     keyBalance: Number(passport.key_balance || 0),
     relayCode,
+    isInstructor: Boolean(passport.is_instructor),
+    doorAccess,
+    membershipAccess,
+    techniqueLab,
     signals: (signalsResult.results || []).map((signal) => ({
       code: signal.public_code,
       title: signal.title,
@@ -259,6 +299,63 @@ async function buildPublicPassport(passport, env) {
       createdAt: latestKeyTransaction.created_at
     } : null
   };
+}
+
+function getDoorAccess(_passport) {
+  return { state: "locked" };
+}
+
+async function getLifetimeKeysEarned(passportId, env) {
+  const result = await env.DB.prepare(`
+    SELECT COALESCE(SUM(kt.amount), 0) AS lifetime_keys
+    FROM key_transactions kt
+    JOIN mission_completions mc ON mc.id = kt.reason_id AND mc.passport_id = kt.passport_id
+    WHERE kt.passport_id = ? AND kt.transaction_type = 'earned' AND kt.reason_type = 'mission' AND kt.amount > 0
+  `).bind(passportId).first();
+  return Number(result?.lifetime_keys || 0);
+}
+
+async function ensureMembershipCapabilities(passportId, env) {
+  const lifetimeKeys = await getLifetimeKeysEarned(passportId, env);
+  const statements = [];
+  if (lifetimeKeys >= 25) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO member_capabilities (passport_id, capability) VALUES (?, 'membership_nomination')`).bind(passportId));
+  if (lifetimeKeys >= 75) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO member_capabilities (passport_id, capability) VALUES (?, 'membership_invitation')`).bind(passportId));
+  if (statements.length) await env.DB.batch(statements);
+  const result = await env.DB.prepare(`SELECT capability, unlocked_at FROM member_capabilities WHERE passport_id = ?`).bind(passportId).all();
+  const capabilities = new Map((result.results || []).map((row) => [row.capability, row.unlocked_at]));
+  return {
+    canNominate: capabilities.has('membership_nomination'),
+    canInvite: capabilities.has('membership_invitation'),
+    nominationUnlockedAt: capabilities.get('membership_nomination') || null,
+    invitationUnlockedAt: capabilities.get('membership_invitation') || null
+  };
+}
+
+async function requireMembershipCapability(rawCardId, capability, env) {
+  const cardId = normalizeCardId(rawCardId);
+  const passport = await getPassportByHash(await sha256(cardId), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground first.");
+  await ensureMembershipCapabilities(passport.passport_id, env);
+  const access = await env.DB.prepare(`SELECT 1 AS allowed FROM member_capabilities WHERE passport_id = ? AND capability = ? LIMIT 1`).bind(passport.passport_id, capability).first();
+  if (!access) throw new HttpError(403, "That access has not been granted.");
+  return passport;
+}
+
+async function submitMembershipNomination(body, env, cors) {
+  const passport = await requireMembershipCapability(body.cardId, 'membership_nomination', env);
+  const nominee = normalizeMissionText(body.nominee, "Who you are thinking of", 2, 160);
+  const reason = normalizeOptionalText(body.reason, "Reason", 600);
+  await env.DB.prepare(`INSERT INTO membership_nominations (id, nominator_passport_id, nominee_description, reason) VALUES (?, ?, ?, ?)`).bind(`nom_${crypto.randomUUID()}`, passport.passport_id, nominee, reason || null).run();
+  return json({ status: "submitted", message: "SIGNAL SENT // We'll take it from here." }, 201, cors);
+}
+
+async function submitMembershipInvitation(body, env, cors) {
+  const passport = await requireMembershipCapability(body.cardId, 'membership_invitation', env);
+  const invitee = normalizeMissionText(body.invitee, "Who you are inviting", 2, 160);
+  const note = normalizeOptionalText(body.note, "Note", 600);
+  await env.DB.prepare(`INSERT INTO membership_invitations (id, inviter_passport_id, invitee_description, note) VALUES (?, ?, ?, ?)`).bind(`invite_${crypto.randomUUID()}`, passport.passport_id, invitee, note || null).run();
+  return json({ status: "requested", message: "INVITATION RECORDED // We'll prepare the access card." }, 201, cors);
 }
 
 function getUndergroundLevel(completedMissionCount) {
@@ -557,6 +654,11 @@ async function evaluateMilestones(passportId, env) {
       AND m.threshold IS NOT NULL
       AND (
         (m.criteria_type = 'events' AND (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = ?) >= m.threshold)
+        OR (m.criteria_type = 'event_locations' AND (
+          SELECT COUNT(DISTINCT LOWER(TRIM(e.location)))
+          FROM event_attendance ea JOIN events e ON e.id = ea.event_id
+          WHERE ea.passport_id = ? AND e.location IS NOT NULL AND TRIM(e.location) != ''
+        ) >= m.threshold)
         OR (m.criteria_type = 'missions' AND (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = ?) >= m.threshold)
         OR (m.criteria_type = 'keys' AND (SELECT COALESCE(SUM(kt.amount), 0) FROM key_transactions kt WHERE kt.passport_id = ?) >= m.threshold)
         OR (m.criteria_type = 'signal_received' AND (
@@ -616,7 +718,7 @@ async function evaluateMilestones(passportId, env) {
         )
       )
   `).bind(
-    passportId, passportId, passportId, passportId, passportId,
+    passportId, passportId, passportId, passportId, passportId, passportId,
     passportId, passportId,
     passportId,
     passportId, passportId, passportId, passportId,
@@ -1317,10 +1419,176 @@ async function updateInvitation(body, env, cors) {
   return await getAdminInvitation(env, cors);
 }
 
+async function buildTechniqueLab(passportId, env, includeInstructorGuidance) {
+  const [settings, result] = await Promise.all([
+    env.DB.prepare(`SELECT checks_available, availability_window FROM technique_settings WHERE id = 1`).first(),
+    env.DB.prepare(`
+      SELECT tc.code, tc.name, tc.member_description, tc.instructor_criteria, tc.feedback_options,
+        tr.status AS request_status, tr.requested_at,
+        latest.result AS latest_result, latest.feedback_tags, latest.instructor_note,
+        latest.instructor_name, latest.checked_at,
+        (SELECT COUNT(*) FROM technique_checks history WHERE history.passport_id = ? AND history.competency_id = tc.id) AS check_count
+      FROM technique_competencies tc
+      LEFT JOIN technique_requests tr ON tr.passport_id = ? AND tr.competency_id = tc.id
+      LEFT JOIN technique_checks latest ON latest.id = (
+        SELECT recent.id FROM technique_checks recent
+        WHERE recent.passport_id = ? AND recent.competency_id = tc.id
+        ORDER BY recent.checked_at DESC, recent.id DESC LIMIT 1
+      )
+      WHERE tc.active = 1 ORDER BY tc.sort_order, tc.id
+    `).bind(passportId, passportId, passportId).all()
+  ]);
+
+  return {
+    checksAvailable: Boolean(settings?.checks_available),
+    availabilityWindow: settings?.availability_window || null,
+    competencies: (result.results || []).map((competency) => {
+      const latestResult = competency.latest_result || null;
+      const state = latestResult === "verified"
+        ? "verified"
+        : ((competency.request_status === "active" || latestResult === "keep_working") ? "working" : "not_checked");
+      const item = {
+        code: competency.code,
+        name: competency.name,
+        description: competency.member_description,
+        state,
+        requestActive: competency.request_status === "active",
+        requestedAt: competency.requested_at || null,
+        latestResult,
+        feedbackTags: parseJsonArray(competency.feedback_tags),
+        instructorNote: competency.instructor_note || null,
+        checkedAt: competency.checked_at || null,
+        checkCount: Number(competency.check_count || 0)
+      };
+      if (includeInstructorGuidance) {
+        item.instructorCriteria = competency.instructor_criteria;
+        item.feedbackOptions = parseJsonArray(competency.feedback_options);
+        item.instructorName = competency.instructor_name || null;
+      }
+      return item;
+    })
+  };
+}
+
+async function requestTechniqueCheck(body, env, cors) {
+  const cardId = normalizeCardId(body.cardId);
+  const passport = await getPassportByHash(await sha256(cardId), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before using Technique Lab.");
+  const competencyCode = String(body.competencyCode || "").trim().toLowerCase();
+  const competency = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ? AND active = 1`).bind(competencyCode).first();
+  if (!competency) throw new HttpError(404, "Technique competency not found.");
+  await env.DB.prepare(`
+    INSERT INTO technique_requests (passport_id, competency_id, status, requested_at, resolved_at)
+    VALUES (?, ?, 'active', CURRENT_TIMESTAMP, NULL)
+    ON CONFLICT(passport_id, competency_id) DO UPDATE SET status = 'active', requested_at = CURRENT_TIMESTAMP, resolved_at = NULL
+  `).bind(passport.passport_id, competency.id).run();
+  return json({ status: "requested", techniqueLab: await buildTechniqueLab(passport.passport_id, env, false) }, 200, cors);
+}
+
+async function getAdminTechniqueMember(body, env, cors) {
+  const passport = await getPassportById(body.passportId, env);
+  if (!passport) throw new HttpError(404, "Member not found.");
+  return json({
+    member: toAdminPassportSummary(passport),
+    techniqueLab: await buildTechniqueLab(passport.passport_id, env, true)
+  }, 200, cors);
+}
+
+async function listTechniqueRequests(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT tr.passport_id, tr.requested_at, p.member_name, c.card_number,
+      tc.code AS competency_code, tc.name AS competency_name
+    FROM technique_requests tr
+    JOIN passports p ON p.id = tr.passport_id
+    JOIN cards c ON c.id = p.card_id
+    JOIN technique_competencies tc ON tc.id = tr.competency_id
+    WHERE tr.status = 'active' AND p.status = 'claimed' AND c.disabled_at IS NULL AND tc.active = 1
+    ORDER BY tr.requested_at, p.member_name COLLATE NOCASE, tc.sort_order
+  `).all();
+  return json({ requests: (result.results || []).map((request) => ({
+    passportId: Number(request.passport_id),
+    memberName: request.member_name,
+    cardNumber: request.card_number,
+    competencyCode: request.competency_code,
+    competencyName: request.competency_name,
+    requestedAt: request.requested_at
+  })) }, 200, cors);
+}
+
+async function recordTechniqueCheck(body, env, cors, authorizedInstructor = null) {
+  const passport = await getPassportById(body.passportId, env);
+  if (!passport) throw new HttpError(404, "Member not found.");
+  const competencyCode = String(body.competencyCode || "").trim().toLowerCase();
+  const competency = await env.DB.prepare(`
+    SELECT id, name, feedback_options FROM technique_competencies WHERE code = ? AND active = 1
+  `).bind(competencyCode).first();
+  if (!competency) throw new HttpError(404, "Technique competency not found.");
+  const result = String(body.result || "").trim().toLowerCase();
+  if (result !== "verified" && result !== "keep_working") throw new HttpError(400, "Choose Verified or Keep Working.");
+  const instructorName = authorizedInstructor
+    ? authorizedInstructor.member_name
+    : normalizeMissionText(body.instructorName, "Instructor name", 2, 80);
+  const createdBy = authorizedInstructor ? `instructor-card:${authorizedInstructor.passport_id}` : "mission-desk-admin";
+  const instructorNote = normalizeOptionalNote(body.instructorNote);
+  const allowedFeedback = new Set(parseJsonArray(competency.feedback_options));
+  const feedbackTags = Array.isArray(body.feedbackTags) ? [...new Set(body.feedbackTags.map((tag) => String(tag).trim()).filter(Boolean))] : [];
+  if (feedbackTags.some((tag) => !allowedFeedback.has(tag))) throw new HttpError(400, "Choose valid feedback guidance.");
+  if (result === "verified" && feedbackTags.length) throw new HttpError(400, "Feedback tags are only used with Keep Working.");
+  const previousKeepWorking = result === "verified" ? await env.DB.prepare(`
+    SELECT id FROM technique_checks WHERE passport_id = ? AND competency_id = ? AND result = 'keep_working' LIMIT 1
+  `).bind(passport.passport_id, competency.id).first() : null;
+  const checkId = `technique_${crypto.randomUUID()}`;
+  const statements = [
+    env.DB.prepare(`
+      INSERT INTO technique_checks
+        (id, passport_id, competency_id, instructor_name, result, feedback_tags, instructor_note, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(checkId, passport.passport_id, competency.id, instructorName, result, JSON.stringify(feedbackTags), instructorNote, createdBy),
+    env.DB.prepare(`
+      INSERT INTO technique_requests (passport_id, competency_id, status, requested_at, resolved_at)
+      VALUES (?, ?, 'resolved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(passport_id, competency_id) DO UPDATE SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP
+    `).bind(passport.passport_id, competency.id)
+  ];
+  if (previousKeepWorking) {
+    statements.push(env.DB.prepare(`
+      INSERT OR IGNORE INTO passport_milestones (passport_id, milestone_id)
+      SELECT ?, id FROM milestones WHERE code = 'technique-second-pass' AND active = 1
+    `).bind(passport.passport_id));
+  }
+  await env.DB.batch(statements);
+  return json({
+    status: "recorded",
+    checkId,
+    milestoneAwarded: Boolean(previousKeepWorking),
+    techniqueLab: await buildTechniqueLab(passport.passport_id, env, true)
+  }, 201, cors);
+}
+
+async function getAdminTechniqueSettings(env, cors) {
+  const settings = await env.DB.prepare(`SELECT checks_available, availability_window, updated_at FROM technique_settings WHERE id = 1`).first();
+  return json({
+    checksAvailable: Boolean(settings?.checks_available),
+    availabilityWindow: settings?.availability_window || "",
+    updatedAt: settings?.updated_at || null
+  }, 200, cors);
+}
+
+async function updateTechniqueSettings(body, env, cors) {
+  const checksAvailable = normalizeBoolean(body.checksAvailable);
+  const availabilityWindow = normalizeOptionalText(body.availabilityWindow, "Availability window", 120);
+  await env.DB.prepare(`
+    UPDATE technique_settings SET checks_available = ?, availability_window = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin' WHERE id = 1
+  `).bind(checksAvailable, availabilityWindow).run();
+  return await getAdminTechniqueSettings(env, cors);
+}
+
 async function getPassportById(rawPassportId, env) {
   const passportId = normalizePositiveInteger(rawPassportId, "Passport");
   return env.DB.prepare(`
     SELECT p.id AS passport_id, p.member_name, p.activation_date, p.status, c.card_number,
+      EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
       (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
       (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
       (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id) AS mission_count,
@@ -1340,6 +1608,122 @@ function toAdminPassportSummary(passport) {
     cardNumber: passport.card_number, activationDate: passport.activation_date,
     keyBalance: Number(passport.key_balance || 0)
   };
+}
+
+async function requireInstructorCard(rawCardId, env) {
+  const cardId = normalizeCardId(rawCardId);
+  const instructor = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name, c.card_number
+    FROM cards c
+    JOIN passports p ON p.card_id = c.id
+    JOIN passport_roles pr ON pr.passport_id = p.id AND pr.role = 'instructor'
+    WHERE c.card_hash = ? AND c.disabled_at IS NULL AND p.status = 'claimed'
+    LIMIT 1
+  `).bind(await sha256(cardId)).first();
+  if (!instructor) throw new HttpError(403, "Instructor access required.");
+  return instructor;
+}
+
+async function listInstructorMembers(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name, c.card_number
+    FROM passports p JOIN cards c ON c.id = p.card_id
+    WHERE p.status = 'claimed' AND c.disabled_at IS NULL
+    ORDER BY p.member_name COLLATE NOCASE
+  `).all();
+  return json({ members: (result.results || []).map((member) => ({
+    passportId: Number(member.passport_id), memberName: member.member_name, cardNumber: member.card_number
+  })) }, 200, cors);
+}
+
+async function listInstructors(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name, c.card_number, pr.granted_at
+    FROM passport_roles pr
+    JOIN passports p ON p.id = pr.passport_id
+    JOIN cards c ON c.id = p.card_id
+    WHERE pr.role = 'instructor'
+    ORDER BY c.card_number
+  `).all();
+  return json({ instructors: (result.results || []).map((instructor) => ({
+    passportId: Number(instructor.passport_id), memberName: instructor.member_name,
+    cardNumber: instructor.card_number, grantedAt: instructor.granted_at
+  })) }, 200, cors);
+}
+
+async function setInstructorRole(body, env, cors) {
+  const passport = await getPassportById(body.passportId, env);
+  if (!passport) throw new HttpError(404, "Member not found.");
+  const enabled = normalizeBoolean(body.enabled);
+  if (enabled) {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO passport_roles (passport_id, role, granted_by) VALUES (?, 'instructor', 'inner-circle-admin')
+    `).bind(passport.passport_id).run();
+  } else {
+    await env.DB.prepare(`DELETE FROM passport_roles WHERE passport_id = ? AND role = 'instructor'`).bind(passport.passport_id).run();
+  }
+  return await listInstructors(env, cors);
+}
+
+async function listMembershipRequests(env, cors) {
+  const [nominations, invitations] = await Promise.all([
+    env.DB.prepare(`
+      SELECT n.id, n.nominee_description, n.reason, n.status, n.submitted_at, n.updated_at,
+        p.member_name AS nominator_name, c.card_number AS nominator_card,
+        EXISTS(SELECT 1 FROM member_capabilities mc WHERE mc.passport_id = n.nominator_passport_id AND mc.capability = 'membership_nomination') AS authority_valid
+      FROM membership_nominations n JOIN passports p ON p.id = n.nominator_passport_id JOIN cards c ON c.id = p.card_id
+      ORDER BY n.submitted_at DESC
+    `).all(),
+    env.DB.prepare(`
+      SELECT i.id, i.invitee_description, i.note, i.status, i.requested_at, i.updated_at,
+        p.member_name AS inviter_name, c.card_number AS inviter_card, assigned.card_number AS assigned_card_number,
+        EXISTS(SELECT 1 FROM member_capabilities mc WHERE mc.passport_id = i.inviter_passport_id AND mc.capability = 'membership_invitation') AS authority_valid
+      FROM membership_invitations i JOIN passports p ON p.id = i.inviter_passport_id JOIN cards c ON c.id = p.card_id
+      LEFT JOIN cards assigned ON assigned.id = i.assigned_card_id
+      ORDER BY i.requested_at DESC
+    `).all()
+  ]);
+  return json({ nominations: nominations.results || [], invitations: invitations.results || [] }, 200, cors);
+}
+
+async function listAvailableInvitationCards(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT c.id, c.card_number FROM cards c JOIN passports p ON p.card_id = c.id
+    WHERE p.status = 'unclaimed' AND c.disabled_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM membership_invitations i WHERE i.assigned_card_id = c.id)
+    ORDER BY CAST(c.card_number AS INTEGER), c.card_number
+  `).all();
+  return json({ cards: (result.results || []).map((card) => ({ cardId: Number(card.id), cardNumber: card.card_number })) }, 200, cors);
+}
+
+async function updateMembershipRequest(body, env, cors) {
+  const requestType = String(body.requestType || "");
+  const requestId = String(body.requestId || "").trim();
+  if (!requestId) throw new HttpError(400, "Request is invalid.");
+  if (requestType === "nomination") {
+    const status = String(body.status || "");
+    if (!["submitted", "approved", "completed", "closed"].includes(status)) throw new HttpError(400, "Nomination status is invalid.");
+    const result = await env.DB.prepare(`UPDATE membership_nominations SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id`).bind(status, requestId).first();
+    if (!result) throw new HttpError(404, "Nomination not found.");
+  } else if (requestType === "invitation") {
+    const status = String(body.status || "");
+    if (!["requested", "card_assigned", "completed", "closed"].includes(status)) throw new HttpError(400, "Invitation status is invalid.");
+    const assignedCardId = body.assignedCardId ? normalizePositiveInteger(body.assignedCardId, "Card") : null;
+    if (status === "card_assigned" && !assignedCardId) throw new HttpError(400, "Choose an available access card.");
+    if (assignedCardId) {
+      const card = await env.DB.prepare(`
+        SELECT c.id FROM cards c JOIN passports p ON p.card_id = c.id
+        WHERE c.id = ? AND c.disabled_at IS NULL AND p.status = 'unclaimed'
+          AND NOT EXISTS(SELECT 1 FROM membership_invitations i WHERE i.assigned_card_id = c.id AND i.id != ?)
+      `).bind(assignedCardId, requestId).first();
+      if (!card) throw new HttpError(409, "That access card is no longer available.");
+    }
+    const result = await env.DB.prepare(`UPDATE membership_invitations SET status = ?, assigned_card_id = COALESCE(?, assigned_card_id), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id`).bind(status, assignedCardId, requestId).first();
+    if (!result) throw new HttpError(404, "Invitation not found.");
+  } else {
+    throw new HttpError(400, "Request type is invalid.");
+  }
+  return await listMembershipRequests(env, cors);
 }
 
 async function requireAdmin(request, env) {
@@ -1455,6 +1839,16 @@ function normalizeEventDate(value) {
   const date = new Date(text);
   if (!text || Number.isNaN(date.getTime())) throw new HttpError(400, "Enter a valid event date and time.");
   return date.toISOString();
+}
+
+function parseJsonArray(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function readJson(request) {

@@ -13,18 +13,20 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
-  <link rel="stylesheet" href="tap.css" />
-  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="tap.css?v=20260924-logo8" />
+  <script src="app.js?v=20260924-logo8" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
 
   <header class="private-header">
-    <a href="../index.html" class="private-brand" aria-label="Return to the JustBaila main site">
+    <button type="button" class="private-brand underground-logo-trigger" id="underground-logo-trigger" aria-label="JustBaila Underground">
       <img src="../justbaila.png" alt="JustBaila" />
-    </a>
+    </button>
     <p>Private access</p>
   </header>
+
+  <p class="logo-whisper" id="logo-whisper" role="status" aria-live="polite"></p>
 
   <main id="member-content">
     <section class="after-dark-hero tap-hero" aria-labelledby="after-dark-title">
@@ -32,11 +34,24 @@
       <div class="glow glow-two" aria-hidden="true"></div>
       <div class="hero-inner">
         <p class="eyebrow">JustBaila Underground</p>
-        <h1 id="after-dark-title">Welcome to the <span>inner circle.</span></h1>
+        <h1 id="after-dark-title">Welcome to the <a class="inner-circle-entry" id="inner-circle-entry" href="#the-door" aria-label="Enter the hidden room">inner circle.</a></h1>
         <a class="access-seal" id="access-seal" href="#private-assignment" aria-live="polite" hidden>
           <span class="seal-dot" aria-hidden="true"></span>
           <span id="access-label">Following the signal</span>
         </a>
+      </div>
+    </section>
+
+    <section class="door-room" id="door-room" aria-labelledby="door-room-title" hidden>
+      <button class="door-return" id="door-return" type="button">← Return to the Underground</button>
+      <div class="door-room-inner">
+        <p class="door-room-title" id="door-room-title">The Door</p>
+        <button class="underground-door" id="underground-door" type="button" aria-describedby="door-response">
+          <span class="door-surface" aria-hidden="true"><span class="door-seam"></span><span class="door-handle"></span></span>
+          <span class="sr-only">Try the locked Door</span>
+        </button>
+        <p class="door-status">Locked</p>
+        <p class="door-response" id="door-response" role="status" aria-live="polite"></p>
       </div>
     </section>
 
@@ -79,9 +94,10 @@
               <p class="section-kicker">Access granted</p>
               <h2>Welcome, <span id="passport-name"></span>.</h2>
               <p class="underground-level" id="underground-level">INITIATE</p>
+              <p class="member-role" id="member-role" hidden>Instructor</p>
               <p class="member-relay-identity">Relay code <strong id="member-relay-code">------</strong></p>
             </div>
-            <div class="passport-monogram" aria-hidden="true" id="passport-monogram">JB</div>
+            <button class="passport-monogram" id="passport-monogram" type="button" aria-label="Open Technique Lab">JB</button>
           </div>
           <div class="passport-stats" aria-label="Underground activity">
             <div><strong id="attendance-count">0</strong><span>Events</span></div>
@@ -90,6 +106,45 @@
             <div class="keys-stat"><strong id="key-count">0</strong><span>Keys</span></div>
           </div>
           <p class="access-card-meta">Access card <span id="passport-card-number"></span> · Access since <span id="passport-activation-date"></span></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="technique-lab" id="technique-lab" aria-labelledby="technique-lab-title" hidden>
+      <div class="technique-lab-container">
+        <button class="technique-return" id="technique-return" type="button">← Return to the Underground</button>
+        <div class="technique-discovery" id="technique-discovery" hidden>
+          <p class="section-kicker">Another room</p>
+          <h2>Technique Lab</h2>
+          <p>Some things are better checked by another human.</p>
+          <button class="member-button" id="technique-enter" type="button">Enter the Lab</button>
+        </div>
+        <div id="technique-interface" hidden>
+          <div class="technique-heading">
+            <div>
+              <p class="section-kicker">Technique Lab</p>
+              <h2 id="technique-lab-title">What are you working on?</h2>
+              <p>Choose a skill to explore. When you're ready, ask a participating instructor for feedback.</p>
+            </div>
+            <p class="technique-availability" id="technique-availability" hidden>Instructor feedback available</p>
+          </div>
+          <p class="technique-window" id="technique-window" hidden></p>
+          <div class="technique-grid" id="technique-grid"></div>
+          <p class="form-message" id="technique-message" aria-live="polite"></p>
+          <section class="instructor-console" id="instructor-console" aria-labelledby="instructor-console-title" hidden>
+            <div class="instructor-console-heading"><p class="section-kicker">Instructor access</p><h3 id="instructor-console-title">Feedback Room</h3><p>Record a private Technique Lab evaluation for another member.</p></div>
+            <div class="instructor-request-list" id="instructor-request-list"></div>
+            <form id="instructor-check-form">
+              <label>Member<select name="passportId" id="instructor-member" required><option value="">Choose a member</option></select></label>
+              <label>Competency<select name="competencyCode" id="instructor-competency" required disabled><option value="">Choose a member first</option></select></label>
+              <div class="instructor-guidance" id="instructor-guidance" hidden><strong>Instructor guidance</strong><p id="instructor-guidance-copy"></p></div>
+              <fieldset><legend>Result</legend><label><input name="result" type="radio" value="verified" required /> Verified</label><label><input name="result" type="radio" value="keep_working" required /> Keep working</label></fieldset>
+              <fieldset id="instructor-feedback-options" hidden><legend>Feedback guidance</legend><div id="instructor-feedback-tags"></div></fieldset>
+              <label>Optional short note<textarea name="instructorNote" maxlength="500" rows="3"></textarea></label>
+              <button class="member-button" type="submit">Record feedback</button>
+              <p class="form-message" id="instructor-check-message" aria-live="polite"></p>
+            </form>
+          </section>
         </div>
       </div>
     </section>
@@ -129,6 +184,39 @@
       </div>
     </section>
 
+    <section class="membership-expansion gated-content" id="membership-expansion" aria-labelledby="membership-expansion-title" hidden>
+      <div class="membership-expansion-container">
+        <p class="section-kicker">Access expanded</p>
+        <h2 id="membership-expansion-title">Pass it on.</h2>
+        <div class="membership-action-grid">
+          <article class="membership-action" id="nomination-action" hidden>
+            <p class="membership-action-label">Membership nomination</p>
+            <h3>Someone opened the door for you.</h3>
+            <p>Now you can do the same.</p>
+            <form id="nomination-form">
+              <label>Who are you thinking of?<input name="nominee" maxlength="160" required /></label>
+              <label>Why them? <span>Optional</span><textarea name="reason" maxlength="600" rows="3"></textarea></label>
+              <p class="membership-helper">Maybe they welcomed you when you were new. Maybe they're always connecting people. Maybe they bring great energy. Maybe you just think they'd have fun down here.</p>
+              <button class="member-button" type="submit">Send nomination</button>
+              <p class="form-message" id="nomination-message" aria-live="polite"></p>
+            </form>
+          </article>
+          <article class="membership-action membership-invitation-action" id="membership-invitation-action" hidden>
+            <p class="membership-action-label">Membership invitation</p>
+            <h3>Open the door.</h3>
+            <p>You've been down here awhile. You can bring someone in.</p>
+            <form id="membership-invitation-form">
+              <label>Who are you inviting?<input name="invitee" maxlength="160" required /></label>
+              <label>Anything we should know? <span>Optional</span><textarea name="note" maxlength="600" rows="3"></textarea></label>
+              <p class="membership-helper">We'll prepare an available physical access card and coordinate the handoff.</p>
+              <button class="member-button" type="submit">Open the door</button>
+              <p class="form-message" id="membership-invitation-message" aria-live="polite"></p>
+            </form>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <section class="secret-missions gated-content" aria-labelledby="missions-title" hidden>
       <div class="missions-container">
         <p class="section-kicker">For members only</p>
@@ -161,6 +249,14 @@
       </div>
     </section>
   </main>
+
+  <div class="underground-interruption" id="underground-interruption" role="dialog" aria-modal="true" aria-labelledby="interruption-message" hidden>
+    <div class="interruption-inner">
+      <p id="interruption-message"></p>
+      <p class="interruption-detail" id="interruption-detail"></p>
+      <button id="interruption-return" type="button" hidden>Go back.</button>
+    </div>
+  </div>
 
   <div class="key-award" id="key-award" role="status" aria-live="polite" hidden></div>
 

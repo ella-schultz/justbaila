@@ -2,6 +2,36 @@
   min-height: min(760px, 88svh);
 }
 
+.inner-circle-entry { display:block;margin:0 auto;border:0;padding:0;color:var(--rose-soft);background:transparent;cursor:pointer;font:inherit;font-style:italic;letter-spacing:inherit;line-height:inherit;text-decoration:none;transition:color 180ms ease,text-shadow 180ms ease,transform 180ms ease; }
+.inner-circle-entry:hover,.inner-circle-entry:focus-visible { color:#ff79b7;outline:none;text-shadow:0 0 26px rgba(248,40,136,.25); }
+.inner-circle-entry:focus-visible { text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.12em; }
+.inner-circle-entry:active { transform:scale(.99); }
+
+.door-room[hidden] { display:none; }
+.door-room { position:relative;z-index:10;min-height:calc(100svh - 74px);padding:clamp(1.25rem,4vw,3rem);overflow:hidden;background:radial-gradient(ellipse at 50% 46%,rgba(248,40,136,.07),transparent 34rem),linear-gradient(180deg,#09070b,#050406 75%); }
+.door-room::before { position:absolute;inset:0;background:linear-gradient(90deg,transparent 49.8%,rgba(255,255,255,.015) 50%,transparent 50.2%);content:"";pointer-events:none; }
+.door-return { position:relative;z-index:2;border:0;padding:.5rem;color:rgba(217,181,109,.8);background:transparent;cursor:pointer;font:600 .68rem Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase; }
+.door-return:hover,.door-return:focus-visible { color:var(--ivory);outline:1px solid rgba(217,181,109,.35);outline-offset:4px; }
+.door-room-inner { position:relative;display:grid;min-height:calc(100svh - 150px);place-items:center;align-content:center; }
+.door-room-title { margin:0 0 clamp(1.25rem,4vh,2.75rem);color:rgba(217,181,109,.78);font-size:.68rem;font-weight:600;letter-spacing:.34em;text-transform:uppercase; }
+.underground-door { position:relative;width:min(48vw,290px);min-width:190px;aspect-ratio:.58;border:0;padding:0;background:transparent;cursor:pointer;perspective:900px; }
+.door-surface { position:absolute;inset:0;border:1px solid rgba(217,181,109,.28);background:linear-gradient(105deg,rgba(255,255,255,.022),transparent 17%,rgba(248,40,136,.025) 49%,transparent 72%),linear-gradient(180deg,#151117,#09080a);box-shadow:inset 0 0 0 7px #080709,inset 0 0 0 8px rgba(217,181,109,.12),inset 24px 0 45px rgba(0,0,0,.55),inset -10px 0 30px rgba(248,40,136,.025),0 38px 90px rgba(0,0,0,.72),0 0 46px rgba(248,40,136,.045);transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease; }
+.door-seam { position:absolute;inset:8% 10%;border:1px solid rgba(217,181,109,.09);box-shadow:inset 0 0 35px rgba(0,0,0,.65); }
+.door-handle { position:absolute;right:14%;top:50%;width:.55rem;height:.55rem;border:1px solid rgba(217,181,109,.55);border-radius:50%;background:#0d0a0d;box-shadow:0 0 0 4px rgba(217,181,109,.04); }
+.underground-door:hover .door-surface,.underground-door:focus-visible .door-surface { border-color:rgba(217,181,109,.48);box-shadow:inset 0 0 0 7px #080709,inset 0 0 0 8px rgba(217,181,109,.16),inset 24px 0 45px rgba(0,0,0,.55),0 38px 90px rgba(0,0,0,.72),0 0 54px rgba(248,40,136,.08);transform:translateY(-2px); }
+.underground-door:focus-visible { outline:1px solid rgba(248,40,136,.5);outline-offset:9px; }
+.underground-door.door-denied .door-surface { animation:door-denied 420ms ease; }
+.door-status { margin:clamp(1.2rem,3vh,2rem) 0 0;color:var(--ivory);font-size:.72rem;font-weight:600;letter-spacing:.32em;text-transform:uppercase; }
+.door-response { min-height:1.2rem;margin:.9rem 0 0;color:var(--rose-soft);font-size:.64rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase; }
+.door-room-open .private-header,.door-room-open .after-dark-hero,.door-room-open .passport-section,.door-room-open .technique-lab,.door-room-open .gated-content,.door-room-open .private-footer { display:none; }
+.sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
+@keyframes door-denied { 0%,100%{filter:none} 35%{filter:brightness(1.35);transform:translateX(-1px)} 55%{filter:brightness(.82);transform:translateX(1px)} }
+@media (prefers-reduced-motion:reduce) { .inner-circle-entry,.door-surface{transition:none}.underground-door.door-denied .door-surface{animation:none;border-color:rgba(248,40,136,.48)} }
+
+.membership-expansion{padding:1rem clamp(1rem,5vw,4rem) 4rem}.membership-expansion-container{width:min(1120px,100%);margin:0 auto}.membership-expansion h2{margin:.35rem 0 1.5rem;font:600 clamp(2.7rem,6vw,4.5rem)/1 "Cormorant Garamond",Georgia,serif}.membership-action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:1rem}.membership-action{border:1px solid rgba(248,40,136,.32);border-radius:1.3rem;padding:clamp(1.4rem,4vw,2.4rem);background:radial-gradient(circle at 100% 0,rgba(248,40,136,.12),transparent 16rem),rgba(255,255,255,.018)}.membership-action[hidden]{display:none}.membership-invitation-action{border-color:rgba(217,181,109,.38);background:radial-gradient(circle at 100% 0,rgba(217,181,109,.1),transparent 16rem),rgba(255,255,255,.018)}.membership-action-label{margin:0;color:var(--rose-soft);font-size:.68rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase}.membership-action h3{margin:.7rem 0 .3rem;font:600 clamp(2rem,4vw,3rem)/1 "Cormorant Garamond",Georgia,serif}.membership-action>p:not(.membership-action-label){color:var(--muted)}.membership-action form{display:grid;gap:.8rem;margin-top:1.4rem}.membership-action label{display:grid;gap:.45rem;color:var(--gold);font-size:.68rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase}.membership-action label span{color:var(--muted);font-size:.58rem}.membership-action input,.membership-action textarea{border:1px solid rgba(217,181,109,.3);border-radius:.75rem;padding:.8rem;color:var(--ivory);background:rgba(255,255,255,.035);font:inherit;letter-spacing:normal;text-transform:none}.membership-helper{margin:0;color:var(--muted);font-size:.8rem;line-height:1.55}
+
+.underground-logo-trigger{position:relative;border:0;padding:0;background:transparent;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;transform-origin:50% 50%;transition:transform 420ms ease,filter 220ms ease,box-shadow 220ms ease}.underground-logo-trigger:focus-visible{outline:1px solid rgba(217,181,109,.5);outline-offset:7px;border-radius:.25rem}.underground-logo-trigger.logo-flicker{animation:logo-flicker 180ms steps(2,end)}.underground-logo-trigger.logo-discovery-tilted{transform:rotate(5deg)}.underground-logo-trigger.logo-discovery-shifted{transform:translate(7px,-2px)}.underground-logo-trigger.logo-discovery-marked{filter:brightness(1.12);box-shadow:0 0 0 1px rgba(248,40,136,.22),0 0 20px rgba(248,40,136,.12)}.underground-logo-trigger.logo-runaway{transition:transform 110ms ease}.logo-whisper{position:fixed;z-index:90;top:clamp(6.5rem,18vh,10rem);left:50%;width:max-content;max-width:calc(100vw - 2rem);margin:0!important;border:1px solid rgba(248,40,136,.24);border-radius:999px;padding:.55rem .8rem;color:var(--rose-soft)!important;background:rgba(7,5,8,.92);box-shadow:0 12px 36px rgba(0,0,0,.45),0 0 24px rgba(248,40,136,.08);font-size:.66rem!important;font-weight:700!important;letter-spacing:.18em!important;text-align:center;opacity:0;pointer-events:none;transform:translate(-50%,-6px);transition:opacity 150ms ease,transform 150ms ease}.logo-whisper.is-visible{opacity:1;transform:translate(-50%,0)}.underground-interruption[hidden]{display:none}.underground-interruption{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:2rem;background:#030203;opacity:0;transition:opacity 260ms ease}.underground-interruption.is-visible{opacity:1}.interruption-inner{text-align:center}.interruption-inner p{margin:0;color:var(--ivory);font-size:clamp(.8rem,2.4vw,1.05rem);font-weight:600;letter-spacing:.24em;text-transform:uppercase}.interruption-inner .interruption-detail{margin-top:1.4rem;color:var(--rose-soft);font:600 clamp(2.2rem,9vw,5rem)/1 "Cormorant Garamond",Georgia,serif;letter-spacing:.08em}.interruption-inner button{margin-top:2rem;border:0;border-bottom:1px solid rgba(217,181,109,.4);padding:.45rem;color:var(--gold);background:transparent;cursor:pointer;font:600 .7rem Inter,sans-serif;letter-spacing:.16em;text-transform:uppercase}.interruption-inner button:focus-visible{outline:1px solid var(--rose-soft);outline-offset:5px}@keyframes logo-flicker{0%,100%{filter:none}35%{filter:brightness(1.6) saturate(.7);transform:translateX(1px)}65%{filter:brightness(.72);transform:translateX(-1px)}}@media(prefers-reduced-motion:reduce){.underground-logo-trigger,.logo-whisper,.underground-interruption{transition:none}.underground-logo-trigger.logo-flicker{animation:none;filter:brightness(1.15)}}
+
 .passport-section {
   position: relative;
   z-index: 2;
@@ -123,6 +153,10 @@
   text-transform: uppercase;
 }
 
+.member-role { position:absolute;top:0;left:0;display:inline-flex;margin:0!important;border:1px solid rgba(217,181,109,.42);border-radius:999px;padding:.3rem .6rem;color:var(--gold)!important;font-size:.64rem!important;font-style:normal!important;font-weight:700;letter-spacing:.14em;text-transform:uppercase; }
+.member-role[hidden] { display:none; }
+.passport-state.has-instructor-role .passport-heading { padding-top:2.6rem; }
+
 .access-seal {
   text-decoration: none;
   transition: border-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -160,10 +194,79 @@
   border: 1px solid var(--gold);
   border-radius: 50%;
   color: var(--gold);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 2rem;
   letter-spacing: 0.04em;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
+
+.passport-monogram:hover,
+.passport-monogram:focus-visible {
+  border-color: var(--rose-soft);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(248, 40, 136, 0.1), 0 0 28px rgba(248, 40, 136, 0.15);
+}
+
+.passport-monogram:active {
+  transform: scale(0.97);
+}
+
+.technique-lab[hidden] { display: none; }
+.technique-lab { position: relative;z-index:3;padding:0 1.25rem 6rem; }
+.technique-lab-container { width:min(1040px,100%);margin:-4rem auto 0;border:1px solid rgba(248,40,136,.3);border-radius:1.5rem;padding:clamp(1.5rem,5vw,3.5rem);background:radial-gradient(circle at 90% 10%,rgba(248,40,136,.16),transparent 24rem),rgba(15,11,17,.98);box-shadow:0 34px 100px rgba(0,0,0,.5); }
+.technique-return { margin-bottom:2rem;border:0;padding:.4rem 0;color:var(--gold);background:transparent;cursor:pointer;font:600 .74rem Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase; }
+.technique-return:hover,.technique-return:focus-visible { color:var(--ivory);outline:none; }
+.technique-discovery { min-height:320px;display:grid;align-content:center;justify-items:start; }
+.technique-discovery[hidden],.technique-interface[hidden] { display:none; }
+.technique-discovery h2,.technique-heading h2 { margin:.35rem 0;font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(3rem,8vw,6rem);font-weight:600;line-height:.9;text-transform:uppercase; }
+.technique-discovery>p:not(.section-kicker),.technique-heading>div>p:last-child { max-width:690px;color:var(--muted);font-size:1rem;line-height:1.65; }
+.technique-heading { display:flex;align-items:flex-start;justify-content:space-between;gap:2rem; }
+.technique-availability { flex:0 0 auto;border:1px solid rgba(248,40,136,.5);border-radius:999px;padding:.55rem .8rem;color:var(--rose-soft);font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase; }
+.technique-availability[hidden] { display:none; }
+.technique-window { margin:1.25rem 0 0;border-left:2px solid var(--gold);padding:.65rem 1rem;color:var(--ivory);background:rgba(217,181,109,.045);font-size:.86rem;letter-spacing:.02em; }
+.technique-window[hidden] { display:none; }
+.technique-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:2rem; }
+.technique-card { display:flex;min-height:245px;flex-direction:column;border:1px solid var(--white-line);border-radius:1.1rem;padding:1.25rem;background:rgba(255,255,255,.025); }
+.technique-card.technique-verified { border-color:rgba(217,181,109,.46); }
+.technique-card.technique-working { border-color:rgba(248,40,136,.3); }
+.technique-card-heading { display:flex;align-items:flex-start;justify-content:space-between;gap:1rem; }
+.technique-card h3 { margin:0;color:var(--ivory);font-family:"Cormorant Garamond",Georgia,serif;font-size:1.75rem;text-transform:uppercase; }
+.technique-card-heading span { border:1px solid var(--line);border-radius:999px;padding:.28rem .55rem;color:var(--gold);font-size:.62rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap; }
+.technique-card>p { color:var(--muted);line-height:1.55; }
+.technique-feedback { margin:.25rem 0 1rem;border-left:2px solid var(--rose);padding-left:.85rem; }
+.technique-feedback strong { color:var(--rose-soft);font-size:.67rem;letter-spacing:.1em;text-transform:uppercase; }
+.technique-feedback p { margin:.35rem 0 0;color:var(--ivory);font-size:.88rem;line-height:1.45; }
+.technique-request { margin-top:auto;align-self:flex-start;border:1px solid var(--gold);border-radius:999px;padding:.65rem .85rem;color:var(--gold);background:transparent;cursor:pointer;font:600 .72rem Inter,sans-serif; }
+.technique-request:hover,.technique-request:focus-visible { border-color:var(--rose-soft);color:var(--ivory);outline:none; }
+.technique-request:disabled { cursor:default;opacity:.55; }
+.technique-lab-open .passport-section,.technique-lab-open .gated-content { display:none; }
+#technique-interface.instructor-mode>.technique-heading,
+#technique-interface.instructor-mode>.technique-window,
+#technique-interface.instructor-mode>.technique-grid,
+#technique-interface.instructor-mode>#technique-message { display:none; }
+#technique-interface.instructor-mode .instructor-console { margin-top:0;border-top:0;padding-top:0; }
+.instructor-console[hidden] { display:none; }
+.instructor-console { margin-top:3rem;border-top:1px solid rgba(217,181,109,.25);padding-top:2rem; }
+.instructor-console-heading h3 { margin:.35rem 0;color:var(--ivory);font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(2.2rem,5vw,3.5rem);font-weight:600;text-transform:uppercase; }
+.instructor-console-heading>p:last-child { color:var(--muted); }
+.instructor-request-list { display:flex;flex-wrap:wrap;gap:.55rem;margin:1.25rem 0; }
+.instructor-request-heading { width:100%;margin:0;color:var(--gold);font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase; }
+.instructor-request-list button { border:1px solid var(--line);border-radius:999px;padding:.55rem .75rem;color:var(--ivory);background:rgba(255,255,255,.025);cursor:pointer;font:600 .72rem Inter,sans-serif; }
+.instructor-request-list button:hover,.instructor-request-list button:focus-visible { border-color:var(--rose-soft);outline:none; }
+#instructor-check-form { display:grid;gap:.85rem;margin-top:1.25rem; }
+#instructor-check-form>label { display:grid;gap:.4rem;color:var(--gold);font-size:.7rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase; }
+#instructor-check-form select,#instructor-check-form textarea { width:100%;border:1px solid var(--line);border-radius:.8rem;padding:.85rem 1rem;color:var(--ivory);background:rgba(255,255,255,.04);font:inherit; }
+#instructor-check-form select option { color:#111;background:#fff; }
+#instructor-check-form fieldset { display:grid;gap:.65rem;margin:0;border:1px solid var(--white-line);border-radius:.9rem;padding:1rem; }
+#instructor-check-form fieldset[hidden],.instructor-guidance[hidden] { display:none; }
+#instructor-check-form legend { padding:0 .35rem;color:var(--gold);font-size:.7rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase; }
+#instructor-check-form fieldset label { display:flex;align-items:center;gap:.6rem;color:var(--ivory);font-size:.86rem; }
+#instructor-check-form input { accent-color:var(--rose); }
+.instructor-guidance { border-left:2px solid var(--rose);padding:.8rem 1rem;background:rgba(248,40,136,.045); }
+.instructor-guidance strong { color:var(--rose-soft);font-size:.67rem;letter-spacing:.1em;text-transform:uppercase; }
+.instructor-guidance p { margin:.35rem 0 0;color:var(--ivory);line-height:1.55; }
 
 .passport-stats {
   display: grid;
@@ -682,6 +785,10 @@
     width: 5.5rem;
     height: 5.5rem;
   }
+
+  .technique-heading { flex-direction:column; }
+  .technique-grid { grid-template-columns:1fr; }
+  .technique-card { min-height:220px; }
 
   .passport-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
