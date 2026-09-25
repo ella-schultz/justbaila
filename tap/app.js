@@ -1,6 +1,8 @@
 const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const API_BASE_URL = "https://justbaila-inner-circle-api.justbaila-inner-circle.workers.dev";
 const cardId = new URLSearchParams(window.location.search).get("id")?.trim().toUpperCase() || "";
+const accessTokenKey = `justbaila-card-session:v1:${cardId}`;
+let accessToken = window.localStorage.getItem(accessTokenKey) || "";
 let currentUndergroundLevel = null;
 let currentTechniqueLab = null;
 let currentMemberName = "";
@@ -9,6 +11,7 @@ let selectedInstructorMember = null;
 let currentDoorAccess = null;
 let doorAttempts = 0;
 let logoMemberContext = null;
+let currentArchiveEntries = [];
 
 const LOGO_EASTER_EGG = {
   initial: [null, "DON'T.", "SERIOUSLY."],
@@ -46,6 +49,8 @@ const states = {
   invalid: document.querySelector("#invalid-state"),
   error: document.querySelector("#error-state"),
   claim: document.querySelector("#claim-state"),
+  pinSetup: document.querySelector("#pin-setup-state"),
+  pin: document.querySelector("#pin-state"),
   passport: document.querySelector("#passport-state")
 };
 
@@ -54,6 +59,8 @@ const accessSeal = document.querySelector("#access-seal");
 const gatedContent = document.querySelectorAll(".gated-content");
 const claimForm = document.querySelector("#claim-form");
 const claimMessage = document.querySelector("#claim-message");
+const pinSetupForm = document.querySelector("#pin-setup-form");
+const pinForm = document.querySelector("#pin-form");
 const retryButton = document.querySelector("#retry-button");
 const eventCheckinForm = document.querySelector("#event-checkin-form");
 const eventCheckinSection = document.querySelector(".event-checkin");
@@ -69,8 +76,13 @@ const undergroundDoor = document.querySelector("#underground-door");
 const nominationForm = document.querySelector("#nomination-form");
 const membershipInvitationForm = document.querySelector("#membership-invitation-form");
 const undergroundLogo = document.querySelector("#underground-logo-trigger");
+const archiveTrigger = document.querySelector("#archive-trigger");
+const archiveRoom = document.querySelector("#archive-room");
 
 claimForm.addEventListener("submit", claimPassport);
+pinSetupForm.addEventListener("submit", setupPin);
+pinForm.addEventListener("submit", unlockPin);
+document.querySelector("#pin-forgot").addEventListener("click", requestPinReset);
 retryButton.addEventListener("click", loadPassport);
 eventCheckinForm.addEventListener("submit", checkInEvent);
 milestoneClaimForm.addEventListener("submit", claimMilestone);
@@ -86,6 +98,10 @@ undergroundDoor.addEventListener("click", tryDoor);
 nominationForm.addEventListener("submit", submitMembershipNomination);
 membershipInvitationForm.addEventListener("submit", submitMembershipInvitation);
 undergroundLogo.addEventListener("click", handleLogoInteraction);
+archiveTrigger.addEventListener("click", openArchive);
+document.querySelector("#archive-close").addEventListener("click", closeArchive);
+archiveRoom.addEventListener("click", (event) => { if (event.target === archiveRoom) closeArchive(); });
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !archiveRoom.hidden) closeArchive(); });
 document.querySelector("#interruption-return").addEventListener("click", closeLogoInterruption);
 window.addEventListener("pagehide", resetLogoEffects);
 window.addEventListener("hashchange", resetLogoEffects);
@@ -103,7 +119,7 @@ async function loadPassport() {
     const response = await fetch(`${API_BASE_URL}/api/card/lookup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId })
+      body: JSON.stringify({ cardId, accessToken })
     });
     const result = await response.json();
 
@@ -111,6 +127,8 @@ async function loadPassport() {
       showState("claim", "Access detected");
       return;
     }
+    if (result.status === "pin_setup") { showState("pinSetup", "Secure your access"); return; }
+    if (result.status === "pin_required") { showState("pin", "Access protected"); return; }
     if (result.status === "claimed" && result.passport) {
       renderPassport(result.passport);
       return;
@@ -141,10 +159,7 @@ async function claimPassport(event) {
       body: JSON.stringify({ cardId, memberName })
     });
     const result = await response.json();
-    if ((response.ok || response.status === 409) && result.status === "claimed" && result.passport) {
-      renderPassport(result.passport);
-      return;
-    }
+    if ((response.ok || response.status === 409) && result.status === "pin_setup") { showState("pinSetup", "Secure your access"); return; }
     if (response.status === 404 || result.status === "invalid") {
       showState("invalid", "Card not recognized");
       return;
@@ -158,6 +173,49 @@ async function claimPassport(event) {
   }
 }
 
+async function setupPin(event) {
+  event.preventDefault();
+  const data = new FormData(pinSetupForm);
+  const pin = String(data.get("pin") || "");
+  const confirmPin = String(data.get("confirmPin") || "");
+  const message = document.querySelector("#pin-setup-message");
+  if (pin !== confirmPin) { message.textContent = "Those PINs do not match."; return; }
+  await submitPinRequest("/api/card/pin/setup", pin, message, pinSetupForm);
+}
+
+async function unlockPin(event) {
+  event.preventDefault();
+  const pin = String(new FormData(pinForm).get("pin") || "");
+  await submitPinRequest("/api/card/pin/unlock", pin, document.querySelector("#pin-message"), pinForm);
+}
+
+async function submitPinRequest(path, pin, message, form) {
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true; message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, pin }) });
+    const result = await response.json();
+    if (!response.ok || !result.accessToken || !result.passport) throw new Error(result.error || "Access could not be unlocked.");
+    accessToken = result.accessToken;
+    window.localStorage.setItem(accessTokenKey, accessToken);
+    form.reset();
+    renderPassport(result.passport);
+  } catch (error) { message.textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
+async function requestPinReset() {
+  const message = document.querySelector("#pin-reset-message");
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/card/pin/reset-request`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "We couldn't send the reset request.");
+    message.textContent = result.message;
+  } catch (error) { message.textContent = error.message; }
+}
+
+function memberPayload(values = {}) { return { cardId, accessToken, ...values }; }
+
 async function checkInEvent(event) {
   event.preventDefault();
   const button = eventCheckinForm.querySelector("button[type='submit']");
@@ -170,7 +228,7 @@ async function checkInEvent(event) {
     const response = await fetch(`${API_BASE_URL}/api/events/check-in`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, checkInCode })
+      body: JSON.stringify(memberPayload({ checkInCode }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t check you in.");
@@ -197,7 +255,7 @@ async function claimMilestone(event) {
     const response = await fetch(`${API_BASE_URL}/api/milestones/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, claimCode })
+      body: JSON.stringify(memberPayload({ claimCode }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t claim this milestone.");
@@ -218,6 +276,7 @@ function renderPassport(passport) {
   document.querySelector("#passport-name").textContent = passport.memberName;
   currentMemberName = passport.memberName;
   currentDoorAccess = passport.doorAccess || { state: "locked" };
+  currentArchiveEntries = passport.archiveEntries || [];
   isInstructor = Boolean(passport.isInstructor);
   document.querySelector("#member-role").hidden = !isInstructor;
   document.querySelector("#passport-state").classList.toggle("has-instructor-role", isInstructor);
@@ -510,7 +569,7 @@ async function submitMembershipNomination(event) {
   button.disabled = true;
   message.textContent = "Sending signal…";
   try {
-    const response = await fetch(`${API_BASE_URL}/api/membership/nominate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, nominee: data.get("nominee"), reason: data.get("reason") }) });
+    const response = await fetch(`${API_BASE_URL}/api/membership/nominate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(memberPayload({ nominee: data.get("nominee"), reason: data.get("reason") })) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn't send that nomination.");
     nominationForm.reset();
@@ -527,7 +586,7 @@ async function submitMembershipInvitation(event) {
   button.disabled = true;
   message.textContent = "Recording invitation…";
   try {
-    const response = await fetch(`${API_BASE_URL}/api/membership/invite`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, invitee: data.get("invitee"), note: data.get("note") }) });
+    const response = await fetch(`${API_BASE_URL}/api/membership/invite`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(memberPayload({ invitee: data.get("invitee"), note: data.get("note") })) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn't record that invitation.");
     membershipInvitationForm.reset();
@@ -661,7 +720,7 @@ async function requestTechniqueCheck(competency, button) {
     const response = await fetch(`${API_BASE_URL}/api/technique/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, competencyCode: competency.code })
+      body: JSON.stringify(memberPayload({ competencyCode: competency.code }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t save that request.");
@@ -679,7 +738,7 @@ async function instructorApi(path, payload = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cardId, ...payload })
+    body: JSON.stringify(memberPayload(payload))
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Instructor access is unavailable.");
@@ -830,7 +889,7 @@ async function resolveRecipient(event, signal, article) {
   button.textContent = "Checking…";
   message.textContent = "";
   try {
-    const response = await fetch(`${API_BASE_URL}/api/signals/recipient`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, signalCode: signal.code, relayCode }) });
+    const response = await fetch(`${API_BASE_URL}/api/signals/recipient`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(memberPayload({ signalCode: signal.code, relayCode })) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "That member could not be found.");
     form.hidden = true;
@@ -861,7 +920,7 @@ async function confirmRelay(signal, relayCode, button, container) {
   button.disabled = true;
   button.textContent = "Relaying…";
   try {
-    const response = await fetch(`${API_BASE_URL}/api/signals/relay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, signalCode: signal.code, relayCode, idempotencyKey: crypto.randomUUID().replaceAll("-", "") }) });
+    const response = await fetch(`${API_BASE_URL}/api/signals/relay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(memberPayload({ signalCode: signal.code, relayCode, idempotencyKey: crypto.randomUUID().replaceAll("-", "") })) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "The Signal could not be relayed.");
     renderPassport(result.passport);
@@ -916,7 +975,7 @@ async function redeemReward(reward, button, message) {
     const response = await fetch(`${API_BASE_URL}/api/rewards/redeem`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, rewardCode: reward.code, idempotencyKey: crypto.randomUUID().replaceAll("-", "") })
+      body: JSON.stringify(memberPayload({ rewardCode: reward.code, idempotencyKey: crypto.randomUUID().replaceAll("-", "") }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t redeem this reward.");
@@ -944,6 +1003,42 @@ function renderInvitation(invitation) {
     link.textContent = "";
     link.removeAttribute("href");
   }
+}
+
+function openArchive() {
+  const files = document.querySelector("#archive-files");
+  files.replaceChildren(...currentArchiveEntries.map(makeArchiveFile));
+  archiveRoom.hidden = false;
+  document.body.classList.add("archive-open");
+  document.querySelector("#archive-close").focus({ preventScroll: true });
+}
+
+function closeArchive() {
+  archiveRoom.hidden = true;
+  document.body.classList.remove("archive-open");
+  archiveTrigger.focus({ preventScroll: true });
+}
+
+function makeArchiveFile(entry) {
+  const article = document.createElement("article");
+  article.className = `archive-file archive-file-${entry.type || "text"}`;
+  const code = document.createElement("p");
+  code.className = "archive-file-code";
+  code.textContent = entry.code;
+  const title = document.createElement("h3");
+  title.textContent = entry.title;
+  const body = document.createElement("p");
+  body.textContent = entry.body;
+  article.append(code, title, body);
+  if (entry.href && entry.actionLabel) {
+    const link = document.createElement("a");
+    link.href = entry.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = entry.actionLabel;
+    article.append(link);
+  }
+  return article;
 }
 
 function renderMilestones(milestones) {
@@ -986,7 +1081,7 @@ async function claimMilestoneDirect(milestone, button, message) {
     const response = await fetch(`${API_BASE_URL}/api/milestones/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, milestoneCode: milestone.code })
+      body: JSON.stringify(memberPayload({ milestoneCode: milestone.code }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t claim this milestone.");
@@ -1042,7 +1137,14 @@ function renderMissions(missions) {
       ? `+${mission.keysEarned} ${mission.keysEarned === 1 ? "KEY" : "KEYS"} EARNED`
       : `${mission.keyReward} ${mission.keyReward === 1 ? "KEY" : "KEYS"}`;
     article.append(description, reward);
-    if (!mission.completed || mission.repeatable) article.append(makeClaimForm(mission));
+    if (mission.nextAvailableAt) {
+      const cooldown = document.createElement("p");
+      cooldown.className = "mission-cooldown";
+      cooldown.textContent = `Available again ${formatDateTime(mission.nextAvailableAt)}`;
+      article.append(cooldown);
+    } else if (!mission.completed || mission.repeatable) {
+      article.append(makeClaimForm(mission));
+    }
     return article;
   }));
 }
@@ -1089,12 +1191,11 @@ async function claimMission(event, mission) {
     const response = await fetch(`${API_BASE_URL}/api/missions/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cardId,
+      body: JSON.stringify(memberPayload({
         missionCode: mission.code,
         verificationCode,
         idempotencyKey: crypto.randomUUID().replaceAll("-", "")
-      })
+      }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t claim this mission.");
@@ -1138,6 +1239,17 @@ function formatDate(value) {
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "recently";
   return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(date);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "soon";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function getInitials(name) {

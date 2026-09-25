@@ -297,6 +297,7 @@ a {
 }
 
 .invitation-mark {
+  appearance: none;
   display: grid;
   width: 7rem;
   height: 7rem;
@@ -307,6 +308,13 @@ a {
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 2.4rem;
   letter-spacing: 0.05em;
+  background: transparent;
+  cursor: default;
+}
+
+.invitation-mark:focus-visible {
+  outline: 1px solid rgba(217, 181, 109, 0.65);
+  outline-offset: 6px;
 }
 
 .private-footer {

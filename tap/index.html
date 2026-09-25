@@ -13,8 +13,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
-  <link rel="stylesheet" href="tap.css?v=20260924-logo8" />
-  <script src="app.js?v=20260924-logo8" defer></script>
+  <link rel="stylesheet" href="tap.css?v=20260924-pin1" />
+  <script src="app.js?v=20260924-pin1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
@@ -86,6 +86,25 @@
             <button class="member-button" type="submit">Enter the Underground</button>
             <p class="form-message" id="claim-message" aria-live="polite"></p>
           </form>
+        </div>
+
+        <div class="passport-state claim-state" id="pin-setup-state" hidden>
+          <p class="section-kicker">Secure your access</p>
+          <h2>Create a 4-digit PIN.</h2>
+          <p>This PIN protects your Underground card whenever it is tapped.</p>
+          <form class="claim-form" id="pin-setup-form">
+            <label for="new-pin">New PIN</label><input id="new-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password" required />
+            <label for="confirm-pin">Confirm PIN</label><input id="confirm-pin" name="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password" required />
+            <button class="member-button" type="submit">Set PIN</button><p class="form-message" id="pin-setup-message" aria-live="polite"></p>
+          </form>
+        </div>
+
+        <div class="passport-state claim-state" id="pin-state" hidden>
+          <p class="section-kicker">Access protected</p><h2>Enter your PIN.</h2><p>This access card is locked.</p>
+          <form class="claim-form" id="pin-form"><label for="card-pin">4-digit PIN</label><input id="card-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="current-password" required /><button class="member-button" type="submit">Unlock</button><p class="form-message" id="pin-message" aria-live="polite"></p></form>
+          <button class="pin-forgot" id="pin-forgot" type="button">Forgot PIN?</button>
+          <p class="pin-reset-note">Reset requests are handled at the convenience of the JustBaila team.</p>
+          <p class="form-message" id="pin-reset-message" aria-live="polite"></p>
         </div>
 
         <div class="passport-state" id="passport-state" hidden>
@@ -180,7 +199,7 @@
           <p id="invitation-description">Keep this card close. Private event details and member opportunities will appear here first.</p>
           <a class="invitation-link" id="invitation-link" href="#" target="_blank" rel="noopener noreferrer" hidden></a>
         </div>
-        <span class="invitation-mark" aria-hidden="true">JB</span>
+        <button class="invitation-mark" id="archive-trigger" type="button" aria-label="Open the Underground Archive">JB</button>
       </div>
     </section>
 
@@ -249,6 +268,18 @@
       </div>
     </section>
   </main>
+
+  <div class="archive-room" id="archive-room" role="dialog" aria-modal="true" aria-labelledby="archive-title" hidden>
+    <div class="archive-shell">
+      <button class="archive-close" id="archive-close" type="button">Close file ×</button>
+      <header class="archive-heading">
+        <p class="section-kicker">Restricted records</p>
+        <h2 id="archive-title">The Archive</h2>
+        <p>Some things are left here for whoever thinks to look.</p>
+      </header>
+      <div class="archive-files" id="archive-files"></div>
+    </div>
+  </div>
 
   <div class="underground-interruption" id="underground-interruption" role="dialog" aria-modal="true" aria-labelledby="interruption-message" hidden>
     <div class="interruption-inner">

@@ -18,49 +18,61 @@ export default {
     try {
       if (request.method === "POST" && url.pathname === "/api/card/lookup") {
         await enforceRateLimit(request, env);
-        const { cardId } = await readJson(request);
-        return await lookupCard(cardId, env, cors);
+        const { cardId, accessToken } = await readJson(request);
+        return await lookupCard(cardId, accessToken, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/card/claim") {
         await enforceRateLimit(request, env);
         const { cardId, memberName } = await readJson(request);
         return await claimCard(cardId, memberName, env, cors);
       }
+      if (request.method === "POST" && url.pathname === "/api/card/pin/setup") {
+        await enforceRateLimit(request, env);
+        return await setupCardPin(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/card/pin/unlock") {
+        await enforceRateLimit(request, env);
+        return await unlockCardPin(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/card/pin/reset-request") {
+        await enforceRateLimit(request, env);
+        return await requestPinReset(await readJson(request), env, cors);
+      }
       if (request.method === "POST" && url.pathname === "/api/missions/claim") {
         await enforceRateLimit(request, env);
-        return await claimMission(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await claimMission(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/events/check-in") {
         await enforceRateLimit(request, env);
-        return await checkInEvent(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await checkInEvent(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/milestones/claim") {
         await enforceRateLimit(request, env);
-        return await claimMilestone(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await claimMilestone(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/technique/request") {
         await enforceRateLimit(request, env);
-        return await requestTechniqueCheck(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await requestTechniqueCheck(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/rewards/redeem") {
         await enforceRateLimit(request, env);
-        return await redeemReward(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await redeemReward(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/membership/nominate") {
         await enforceRateLimit(request, env);
-        return await submitMembershipNomination(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await submitMembershipNomination(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/membership/invite") {
         await enforceRateLimit(request, env);
-        return await submitMembershipInvitation(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await submitMembershipInvitation(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/signals/recipient") {
         await enforceRateLimit(request, env);
-        return await resolveSignalRecipient(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await resolveSignalRecipient(body, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/signals/relay") {
         await enforceRateLimit(request, env);
-        return await relaySignal(await readJson(request), env, cors);
+        const body = await readJson(request); await requirePinSession(body, env); return await relaySignal(body, env, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/public/schedule") {
         return await getPublicSchedule(env, cors);
@@ -68,6 +80,7 @@ export default {
       if (request.method === "POST" && url.pathname.startsWith("/api/instructor/")) {
         await enforceRateLimit(request, env);
         const body = await readJson(request);
+        await requirePinSession(body, env);
         const instructor = await requireInstructorCard(body.cardId, env);
         if (url.pathname === "/api/instructor/members") return await listInstructorMembers(env, cors);
         if (url.pathname === "/api/instructor/technique/requests") return await listTechniqueRequests(env, cors);
@@ -79,6 +92,8 @@ export default {
         const body = await readJson(request);
         if (url.pathname === "/api/admin/passports/search") return await searchPassports(body.query, env, cors);
         if (url.pathname === "/api/admin/passports/details") return await getAdminPassport(body.passportId, env, cors);
+        if (url.pathname === "/api/admin/passports/reset-pin") return await adminResetPin(body, env, cors);
+        if (url.pathname === "/api/admin/passports/dismiss-pin-reset") return await dismissPinReset(body, env, cors);
         if (url.pathname === "/api/admin/missions/complete") return await completeMission(body, env, cors);
         if (url.pathname === "/api/admin/missions/create") return await createMission(body, env, cors);
         if (url.pathname === "/api/admin/missions/list") return await listAdminMissions(env, cors);
@@ -107,6 +122,10 @@ export default {
         if (url.pathname === "/api/admin/rewards/create") return await createReward(body, env, cors);
         if (url.pathname === "/api/admin/rewards/update") return await updateReward(body, env, cors);
         if (url.pathname === "/api/admin/rewards/set-active") return await setRewardActive(body, env, cors);
+        if (url.pathname === "/api/admin/archive/list") return await listAdminArchiveEntries(env, cors);
+        if (url.pathname === "/api/admin/archive/create") return await createArchiveEntry(body, env, cors);
+        if (url.pathname === "/api/admin/archive/update") return await updateArchiveEntry(body, env, cors);
+        if (url.pathname === "/api/admin/archive/set-active") return await setArchiveEntryActive(body, env, cors);
         if (url.pathname === "/api/admin/rewards/redemptions") return await listRewardRedemptions(env, cors);
         if (url.pathname === "/api/admin/rewards/fulfill") return await fulfillReward(body, env, cors);
         if (url.pathname === "/api/admin/invitation/get") return await getAdminInvitation(env, cors);
@@ -136,12 +155,14 @@ export default {
   }
 };
 
-async function lookupCard(rawCardId, env, cors) {
+async function lookupCard(rawCardId, accessToken, env, cors) {
   const cardId = normalizeCardId(rawCardId);
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) return json({ status: "invalid" }, 404, cors);
   if (passport.status === "unclaimed") return json({ status: "unclaimed", cardNumber: passport.card_number }, 200, cors);
   if (passport.status !== "claimed") return json({ status: "unavailable" }, 403, cors);
+  if (!passport.pin_hash) return json({ status: "pin_setup", cardNumber: passport.card_number }, 200, cors);
+  if (!await hasValidPinSession(passport.passport_id, accessToken, env)) return json({ status: "pin_required", cardNumber: passport.card_number }, 200, cors);
   return json({ status: "claimed", passport: await buildPublicPassport(passport, env) }, 200, cors);
 }
 
@@ -160,16 +181,97 @@ async function claimCard(rawCardId, rawMemberName, env, cors) {
   if (!result) {
     const existing = await getPassportByHash(cardHash, env);
     if (!existing || existing.disabled_at) return json({ status: "invalid" }, 404, cors);
-    if (existing.status === "claimed") return json({ status: "claimed", passport: await buildPublicPassport(existing, env) }, 409, cors);
+    if (existing.status === "claimed") return json({ status: existing.pin_hash ? "pin_required" : "pin_setup", cardNumber: existing.card_number }, 409, cors);
     return json({ status: "unavailable" }, 403, cors);
   }
   const passport = await getPassportByHash(cardHash, env);
-  return json({ status: "claimed", passport: await buildPublicPassport(passport, env) }, 201, cors);
+  return json({ status: "pin_setup", cardNumber: passport.card_number }, 201, cors);
+}
+
+async function setupCardPin(body, env, cors) {
+  const cardId = normalizeCardId(body.cardId);
+  const pin = normalizePin(body.pin);
+  const passport = await getPassportByHash(await sha256(cardId), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "Claim this access card first.");
+  if (passport.pin_hash) throw new HttpError(409, "This card already has a PIN.");
+  const salt = makeRandomToken(16);
+  const pinHash = await hashPin(pin, salt);
+  await env.DB.prepare(`UPDATE passports SET pin_hash = ?, pin_salt = ?, pin_failed_attempts = 0, pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND pin_hash IS NULL`)
+    .bind(pinHash, salt, passport.passport_id).run();
+  const accessToken = await createPinSession(passport.passport_id, env);
+  const refreshed = await getPassportByHash(await sha256(cardId), env);
+  return json({ status: "claimed", accessToken, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
+}
+
+async function unlockCardPin(body, env, cors) {
+  const cardId = normalizeCardId(body.cardId);
+  const pin = normalizePin(body.pin);
+  const passport = await getPassportByHash(await sha256(cardId), env);
+  if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (!passport.pin_hash) return json({ status: "pin_setup", cardNumber: passport.card_number }, 409, cors);
+  if (passport.pin_locked_until && new Date(`${passport.pin_locked_until.replace(" ", "T")}Z`).getTime() > Date.now()) {
+    throw new HttpError(429, "Too many incorrect attempts. Try again in 15 minutes.");
+  }
+  const valid = constantTimeEqual(await hashPin(pin, passport.pin_salt), passport.pin_hash);
+  if (!valid) {
+    const failedAttempts = Number(passport.pin_failed_attempts || 0) + 1;
+    const lock = failedAttempts >= 5;
+    await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = ?, pin_locked_until = CASE WHEN ? THEN datetime('now', '+15 minutes') ELSE NULL END WHERE id = ?`)
+      .bind(lock ? 0 : failedAttempts, lock ? 1 : 0, passport.passport_id).run();
+    throw new HttpError(lock ? 429 : 403, lock ? "Too many incorrect attempts. Try again in 15 minutes." : "That PIN is not correct.");
+  }
+  await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = 0, pin_locked_until = NULL WHERE id = ?`).bind(passport.passport_id).run();
+  const accessToken = await createPinSession(passport.passport_id, env);
+  return json({ status: "claimed", accessToken, passport: await buildPublicPassport(passport, env) }, 200, cors);
+}
+
+async function requestPinReset(body, env, cors) {
+  const passport = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
+  if (!passport || passport.disabled_at || passport.status !== "claimed") throw new HttpError(404, "Card not recognized.");
+  await env.DB.prepare(`INSERT OR IGNORE INTO pin_reset_requests (passport_id) VALUES (?)`).bind(passport.passport_id).run();
+  return json({ status: "requested", message: "Reset requested. PIN resets are completed at the convenience of the JustBaila team." }, 201, cors);
+}
+
+async function createPinSession(passportId, env) {
+  const accessToken = makeRandomToken(32);
+  await env.DB.prepare(`INSERT INTO card_access_sessions (token_hash, passport_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`)
+    .bind(await sha256(accessToken), passportId).run();
+  return accessToken;
+}
+
+async function hasValidPinSession(passportId, accessToken, env) {
+  if (!accessToken) return false;
+  const session = await env.DB.prepare(`SELECT token_hash FROM card_access_sessions WHERE token_hash = ? AND passport_id = ? AND expires_at > CURRENT_TIMESTAMP LIMIT 1`)
+    .bind(await sha256(String(accessToken)), passportId).first();
+  return Boolean(session);
+}
+
+async function requirePinSession(body, env) {
+  const passport = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
+  if (!passport || passport.disabled_at || !await hasValidPinSession(passport.passport_id, body.accessToken, env)) throw new HttpError(401, "Enter your card PIN again.");
+  return passport;
+}
+
+async function adminResetPin(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Passport");
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE passports SET pin_hash = NULL, pin_salt = NULL, pin_failed_attempts = 0, pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(passportId),
+    env.DB.prepare(`DELETE FROM card_access_sessions WHERE passport_id = ?`).bind(passportId),
+    env.DB.prepare(`UPDATE pin_reset_requests SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE passport_id = ? AND status = 'pending'`).bind(passportId)
+  ]);
+  return json({ status: "reset" }, 200, cors);
+}
+
+async function dismissPinReset(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Passport");
+  await env.DB.prepare(`UPDATE pin_reset_requests SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP WHERE passport_id = ? AND status = 'pending'`).bind(passportId).run();
+  return json({ status: "dismissed" }, 200, cors);
 }
 
 async function getPassportByHash(cardHash, env) {
   return env.DB.prepare(`
-    SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date,
+    SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date, p.pin_hash, p.pin_salt, p.pin_failed_attempts, p.pin_locked_until,
       EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
       (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
       (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
@@ -186,9 +288,9 @@ async function buildPublicPassport(passport, env) {
   const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
   const techniqueLab = await buildTechniqueLab(passport.passport_id, env, false);
   const doorAccess = getDoorAccess(passport);
-  const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult] = await Promise.all([
+  const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult, archiveResult] = await Promise.all([
     env.DB.prepare(`
-      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.counts_as_event, m.scope,
+      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.counts_as_event, m.scope, m.social_checkin_only,
         ma.status AS assignment_status,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
         COALESCE(SUM(CASE WHEN kt.amount > 0 THEN kt.amount ELSE 0 END), 0) AS keys_earned
@@ -196,7 +298,11 @@ async function buildPublicPassport(passport, env) {
       LEFT JOIN mission_completions mc ON mc.mission_id = m.id AND mc.passport_id = ?
       LEFT JOIN key_transactions kt ON kt.reason_type = 'mission' AND kt.reason_id = mc.id
       LEFT JOIN mission_assignments ma ON ma.mission_id = m.id AND ma.passport_id = ? AND ma.status = 'active'
-      WHERE m.active = 1 AND (m.scope = 'global' OR ma.id IS NOT NULL)
+      WHERE m.active = 1
+        AND (m.scope = 'global' OR ma.id IS NOT NULL)
+        AND (m.social_checkin_only = 0 OR EXISTS (
+          SELECT 1 FROM invitation_settings settings WHERE settings.id = 1 AND settings.social_checkin_visible = 1
+        ))
       GROUP BY m.id, ma.id
       ORDER BY CASE WHEN m.scope = 'individual' THEN 0 ELSE 1 END, m.sort_order, m.id
     `).bind(passport.passport_id, passport.passport_id).all(),
@@ -226,7 +332,11 @@ async function buildPublicPassport(passport, env) {
       FROM signals s JOIN signal_types st ON st.id = s.signal_type_id
       WHERE s.current_holder_id = ? AND s.status = 'active'
       ORDER BY COALESCE(s.last_relayed_at, s.created_at) DESC
-    `).bind(passport.passport_id).all()
+    `).bind(passport.passport_id).all(),
+    env.DB.prepare(`
+      SELECT code, label, title, body, content_type, action_label, href
+      FROM archive_entries WHERE active = 1 ORDER BY sort_order, id
+    `).all()
   ]);
 
   const milestones = (milestonesResult.results || []).map((milestone) => ({
@@ -255,6 +365,7 @@ async function buildPublicPassport(passport, env) {
     doorAccess,
     membershipAccess,
     techniqueLab,
+    archiveEntries: (archiveResult.results || []).map(toArchiveEntry),
     signals: (signalsResult.results || []).map((signal) => ({
       code: signal.public_code,
       title: signal.title,
@@ -282,14 +393,17 @@ async function buildPublicPassport(passport, env) {
       description: mission.description,
       keyReward: Number(mission.key_reward),
       repeatable: Boolean(mission.repeatable),
+      cooldownHours: Number(mission.cooldown_hours || 0),
       verificationRequired: Boolean(mission.verification_required),
       countsAsEvent: Boolean(mission.counts_as_event),
       scope: mission.scope,
       privateAssignment: mission.scope === "individual",
+      socialCheckinOnly: Boolean(mission.social_checkin_only),
       assignmentStatus: mission.assignment_status || null,
       completed: Number(mission.completion_count) > 0,
       completionCount: Number(mission.completion_count),
       completedAt: mission.completed_at,
+      nextAvailableAt: getMissionNextAvailableAt(mission.completed_at, Number(mission.cooldown_hours || 0)),
       keysEarned: Number(mission.keys_earned || 0)
     })),
     latestKeyTransaction: latestKeyTransaction ? {
@@ -644,6 +758,69 @@ function toAdminReward(reward) {
     keyCost: Number(reward.key_cost), active: Boolean(reward.active), redemptionCount: Number(reward.redemption_count) };
 }
 
+async function listAdminArchiveEntries(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT code, label, title, body, content_type, action_label, href, active, sort_order
+    FROM archive_entries ORDER BY active DESC, sort_order, id
+  `).all();
+  return json({ entries: (result.results || []).map((entry) => ({ ...toArchiveEntry(entry), active: Boolean(entry.active), sortOrder: Number(entry.sort_order) })) }, 200, cors);
+}
+
+async function createArchiveEntry(body, env, cors) {
+  const entry = normalizeArchiveEntry(body);
+  const slug = entry.title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "archive-file";
+  const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+  const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM archive_entries`).first();
+  await env.DB.prepare(`
+    INSERT INTO archive_entries (code, label, title, body, content_type, action_label, href, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(code, entry.label, entry.title, entry.body, entry.contentType, entry.actionLabel, entry.href, Number(sortResult.next_order)).run();
+  return json({ status: "created", code }, 201, cors);
+}
+
+async function updateArchiveEntry(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const entry = normalizeArchiveEntry(body);
+  const result = await env.DB.prepare(`
+    UPDATE archive_entries SET label = ?, title = ?, body = ?, content_type = ?, action_label = ?, href = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE code = ? RETURNING id
+  `).bind(entry.label, entry.title, entry.body, entry.contentType, entry.actionLabel, entry.href, code).first();
+  if (!result) throw new HttpError(404, "Archive file not found.");
+  return json({ status: "updated" }, 200, cors);
+}
+
+async function setArchiveEntryActive(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const active = normalizeBoolean(body.active);
+  const result = await env.DB.prepare(`UPDATE archive_entries SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`).bind(active, code).first();
+  if (!result) throw new HttpError(404, "Archive file not found.");
+  return json({ status: active ? "restored" : "hidden" }, 200, cors);
+}
+
+function toArchiveEntry(entry) {
+  return {
+    code: entry.code,
+    label: entry.label,
+    title: entry.title,
+    body: entry.body,
+    type: entry.content_type || "text",
+    actionLabel: entry.action_label || "",
+    href: entry.href || ""
+  };
+}
+
+function normalizeArchiveEntry(body) {
+  const label = normalizeMissionText(body.label, "Archive label", 2, 60);
+  const title = normalizeMissionText(body.title, "Archive title", 3, 140);
+  const entryBody = normalizeMissionText(body.body, "Archive text", 3, 1200);
+  const contentType = String(body.contentType || "text").trim().toLowerCase();
+  if (!new Set(["text", "link", "audio", "image", "video"]).has(contentType)) throw new HttpError(400, "Archive content type is invalid.");
+  const actionLabel = String(body.actionLabel || "").trim().slice(0, 60) || null;
+  const href = normalizeOptionalUrl(body.href);
+  if ((actionLabel && !href) || (!actionLabel && href)) throw new HttpError(400, "Archive link text and URL must be provided together.");
+  return { label, title, body: entryBody, contentType, actionLabel, href };
+}
+
 async function evaluateMilestones(passportId, env) {
   await env.DB.prepare(`
     INSERT OR IGNORE INTO passport_milestones (passport_id, milestone_id)
@@ -731,7 +908,8 @@ async function searchPassports(rawQuery, env, cors) {
   const query = String(rawQuery || "").trim().slice(0, 80);
   const likeQuery = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
   const result = await env.DB.prepare(`
-    SELECT p.id AS passport_id, p.member_name, p.activation_date, c.card_number,
+    SELECT p.id AS passport_id, p.member_name, p.activation_date, c.card_number, p.pin_hash IS NOT NULL AS pin_configured,
+      EXISTS(SELECT 1 FROM pin_reset_requests prr WHERE prr.passport_id = p.id AND prr.status = 'pending') AS pin_reset_requested,
       (SELECT COALESCE(SUM(amount), 0) FROM key_transactions kt WHERE kt.passport_id = p.id) AS key_balance
     FROM passports p JOIN cards c ON c.id = p.card_id
     WHERE p.status = 'claimed'
@@ -757,7 +935,7 @@ async function completeMission(body, env, cors) {
   const passport = await getPassportById(passportId, env);
   if (!passport) throw new HttpError(404, "Passport not found.");
   const mission = await env.DB.prepare(`
-    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.scope,
+    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.cooldown_hours, m.scope,
       (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
     FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
   `).bind(passportId, missionCode).first();
@@ -783,6 +961,7 @@ async function completeMission(body, env, cors) {
   if (!mission.repeatable && Number(completion.completion_count) > 0) {
     throw new HttpError(409, "This mission has already been completed for this passport.");
   }
+  await enforceMissionCooldown(passportId, mission, env);
 
   const completionNumber = mission.repeatable ? Number(completion.last_completion) + 1 : 1;
   const keysAwarded = Number(mission.key_reward);
@@ -831,12 +1010,16 @@ async function claimMission(body, env, cors) {
   if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before claiming missions.");
 
   const mission = await env.DB.prepare(`
-    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.verification_required, m.verification_code_hash, m.scope,
+    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.verification_code_hash, m.scope, m.social_checkin_only,
       (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
     FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
   `).bind(passport.passport_id, missionCode).first();
   if (!mission) throw new HttpError(404, "Mission not found.");
   if (mission.scope === "individual" && !mission.assignment_id) throw new HttpError(404, "That private assignment is not available to this member.");
+  if (mission.social_checkin_only) {
+    const settings = await env.DB.prepare(`SELECT social_checkin_visible FROM invitation_settings WHERE id = 1`).first();
+    if (!settings?.social_checkin_visible) throw new HttpError(403, "That mission is not currently active.");
+  }
 
   if (mission.verification_required) {
     const verificationCode = normalizeVerificationCode(body.verificationCode);
@@ -853,6 +1036,7 @@ async function claimMission(body, env, cors) {
   if (!mission.repeatable && Number(completion.completion_count) > 0) {
     throw new HttpError(409, "You already completed this mission.");
   }
+  await enforceMissionCooldown(passport.passport_id, mission, env);
 
   const completionNumber = mission.repeatable ? Number(completion.last_completion) + 1 : 1;
   const keysAwarded = Number(mission.key_reward);
@@ -896,11 +1080,13 @@ async function createMission(body, env, cors) {
   const keyReward = Number(body.keyReward);
   if (!Number.isInteger(keyReward) || keyReward < 0 || keyReward > 100) throw new HttpError(400, "Key reward must be between 0 and 100.");
   const repeatable = body.repeatable ? 1 : 0;
+  const cooldownHours = repeatable ? normalizeCooldownHours(body.cooldownHours) : 0;
   const scope = normalizeMissionScope(body.scope);
   if (scope === "individual" && repeatable) throw new HttpError(400, "Individual assignments cannot be repeatable.");
   const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
   if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
+  const socialCheckinOnly = body.socialCheckinOnly ? 1 : 0;
   let verificationCodeHash = null;
   let verificationCodeDisplay = null;
   if (verificationRequired) {
@@ -913,9 +1099,9 @@ async function createMission(body, env, cors) {
   const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM missions`).first();
   const statements = [env.DB.prepare(`
     INSERT INTO missions
-      (code, title, description, key_reward, repeatable, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event, scope)
-    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?)
-  `).bind(code, title, description, keyReward, repeatable, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay, scope)];
+      (code, title, description, key_reward, repeatable, cooldown_hours, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event, scope, social_checkin_only)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
+  `).bind(code, title, description, keyReward, repeatable, cooldownHours, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly)];
   if (scope === "individual") {
     statements.push(env.DB.prepare(`
       INSERT INTO mission_assignments (id, mission_id, passport_id, assigned_by)
@@ -924,12 +1110,12 @@ async function createMission(body, env, cors) {
   }
   await env.DB.batch(statements);
 
-  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), verificationRequired: Boolean(verificationRequired), scope } }, 201, cors);
+  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), cooldownHours, verificationRequired: Boolean(verificationRequired), socialCheckinOnly: Boolean(socialCheckinOnly), scope } }, 201, cors);
 }
 
 async function listAdminMissions(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.verification_required, m.scope,
+    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.scope, m.social_checkin_only,
       m.verification_code_display, m.verification_code_hash IS NOT NULL AS code_configured, m.active,
       COUNT(mc.id) AS completion_count,
       ma.id AS assignment_id, ma.passport_id AS assigned_passport_id, ma.status AS assignment_status,
@@ -962,11 +1148,13 @@ async function updateMission(body, env, cors) {
   const keyReward = Number(body.keyReward);
   if (!Number.isInteger(keyReward) || keyReward < 0 || keyReward > 100) throw new HttpError(400, "Key reward must be between 0 and 100.");
   const repeatable = body.repeatable ? 1 : 0;
+  const cooldownHours = repeatable ? normalizeCooldownHours(body.cooldownHours) : 0;
   const scope = normalizeMissionScope(body.scope);
   if (scope === "individual" && repeatable) throw new HttpError(400, "Individual assignments cannot be repeatable.");
   const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
   if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
+  const socialCheckinOnly = body.socialCheckinOnly ? 1 : 0;
   let verificationCodeHash = existing.verification_code_hash;
   let verificationCodeDisplay = existing.verification_code_display;
   if (verificationRequired && String(body.verificationCode || "").trim()) {
@@ -977,10 +1165,10 @@ async function updateMission(body, env, cors) {
   if (!verificationRequired) { verificationCodeHash = null; verificationCodeDisplay = null; }
 
   const statements = [env.DB.prepare(`
-    UPDATE missions SET title = ?, description = ?, key_reward = ?, repeatable = ?,
-      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, scope = ?, updated_at = CURRENT_TIMESTAMP
+    UPDATE missions SET title = ?, description = ?, key_reward = ?, repeatable = ?, cooldown_hours = ?,
+      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, scope = ?, social_checkin_only = ?, updated_at = CURRENT_TIMESTAMP
     WHERE code = ?
-  `).bind(title, description, keyReward, repeatable, verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, code)];
+  `).bind(title, description, keyReward, repeatable, cooldownHours, verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly, code)];
   const activeAssignment = await env.DB.prepare(`
     SELECT ma.id, ma.passport_id FROM mission_assignments ma WHERE ma.mission_id = ? AND ma.status = 'active' LIMIT 1
   `).bind(existing.id).first();
@@ -1280,7 +1468,9 @@ function toAdminMission(mission) {
   return {
     code: mission.code, title: mission.title, description: mission.description,
     keyReward: Number(mission.key_reward), repeatable: Boolean(mission.repeatable),
+    cooldownHours: Number(mission.cooldown_hours || 0),
     verificationRequired: Boolean(mission.verification_required), verificationCode: mission.verification_code_display || "",
+    socialCheckinOnly: Boolean(mission.social_checkin_only),
     codeConfigured: Boolean(mission.code_configured), active: Boolean(mission.active),
     completionCount: Number(mission.completion_count), scope: mission.scope || "global",
     assignmentId: mission.assignment_id || null,
@@ -1587,7 +1777,8 @@ async function updateTechniqueSettings(body, env, cors) {
 async function getPassportById(rawPassportId, env) {
   const passportId = normalizePositiveInteger(rawPassportId, "Passport");
   return env.DB.prepare(`
-    SELECT p.id AS passport_id, p.member_name, p.activation_date, p.status, c.card_number,
+    SELECT p.id AS passport_id, p.member_name, p.activation_date, p.status, c.card_number, p.pin_hash IS NOT NULL AS pin_configured,
+      EXISTS(SELECT 1 FROM pin_reset_requests prr WHERE prr.passport_id = p.id AND prr.status = 'pending') AS pin_reset_requested,
       EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
       (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
       (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
@@ -1599,14 +1790,14 @@ async function getPassportById(rawPassportId, env) {
 }
 
 async function buildAdminPassport(passport, env) {
-  return { passportId: Number(passport.passport_id), ...await buildPublicPassport(passport, env) };
+  return { passportId: Number(passport.passport_id), pinConfigured: Boolean(passport.pin_configured), pinResetRequested: Boolean(passport.pin_reset_requested), ...await buildPublicPassport(passport, env) };
 }
 
 function toAdminPassportSummary(passport) {
   return {
     passportId: Number(passport.passport_id), memberName: passport.member_name,
     cardNumber: passport.card_number, activationDate: passport.activation_date,
-    keyBalance: Number(passport.key_balance || 0)
+    keyBalance: Number(passport.key_balance || 0), pinConfigured: Boolean(passport.pin_configured), pinResetRequested: Boolean(passport.pin_reset_requested)
   };
 }
 
@@ -1778,6 +1969,35 @@ function normalizeRewardCost(value) {
   return number;
 }
 
+function normalizeCooldownHours(value) {
+  const number = Number(value || 0);
+  if (!Number.isInteger(number) || number < 0 || number > 8760) throw new HttpError(400, "Mission cooldown must be between 0 and 8,760 hours.");
+  return number;
+}
+
+function getMissionNextAvailableAt(completedAt, cooldownHours) {
+  if (!completedAt || cooldownHours < 1) return null;
+  const completed = new Date(completedAt.includes("T") ? completedAt : `${completedAt.replace(" ", "T")}Z`);
+  if (Number.isNaN(completed.getTime())) return null;
+  const nextAvailable = new Date(completed.getTime() + cooldownHours * 60 * 60 * 1000);
+  return nextAvailable.getTime() > Date.now() ? nextAvailable.toISOString() : null;
+}
+
+async function enforceMissionCooldown(passportId, mission, env) {
+  const cooldownHours = Number(mission.cooldown_hours || 0);
+  if (!mission.repeatable || cooldownHours < 1) return;
+  const latest = await env.DB.prepare(`
+    SELECT verified_at FROM mission_completions
+    WHERE passport_id = ? AND mission_id = ? ORDER BY verified_at DESC, rowid DESC LIMIT 1
+  `).bind(passportId, mission.id).first();
+  const nextAvailableAt = getMissionNextAvailableAt(latest?.verified_at, cooldownHours);
+  if (nextAvailableAt) throw new HttpError(409, `This mission is available again ${formatCooldownDate(nextAvailableAt)}.`);
+}
+
+function formatCooldownDate(value) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles", timeZoneName: "short" }).format(new Date(value));
+}
+
 function normalizeBoolean(value) {
   if (value !== true && value !== false) throw new HttpError(400, "Visibility setting is invalid.");
   return value ? 1 : 0;
@@ -1859,6 +2079,24 @@ async function readJson(request) {
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizePin(value) {
+  const pin = String(value || "").trim();
+  if (!/^\d{4}$/.test(pin)) throw new HttpError(400, "Enter a 4-digit PIN.");
+  return pin;
+}
+
+async function hashPin(pin, salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(salt), iterations: 100000 }, key, 256);
+  return [...new Uint8Array(bits)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function makeRandomToken(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function getCorsHeaders(request, env) {
