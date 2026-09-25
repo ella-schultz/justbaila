@@ -12,6 +12,7 @@ let currentDoorAccess = null;
 let doorAttempts = 0;
 let logoMemberContext = null;
 let currentArchiveEntries = [];
+const BLACK_SCREEN_COOLDOWN_MS = 365 * 24 * 60 * 60 * 1000;
 
 const LOGO_EASTER_EGG = {
   initial: [null, "DON'T.", "SERIOUSLY."],
@@ -23,7 +24,17 @@ const LOGO_EASTER_EGG = {
     "NOTHING HAS CHANGED.",
     "STILL JUST A LOGO.",
     "PLEASE FIND SOMETHING PRODUCTIVE TO DO.",
-    "THIS IS BECOMING A HABIT."
+    "THIS IS BECOMING A HABIT.",
+    "WE SAW THAT.",
+    "CURIOUS, AREN'T YOU?",
+    "THIS STILL ISN'T NAVIGATION.",
+    "YOU CHECKED. NOTHING HAPPENED.",
+    "THE LOGO HAS NO COMMENT.",
+    "BACK SO SOON?",
+    "YOUR PERSISTENCE HAS BEEN NOTED.",
+    "SOME DOORS STAY CLOSED.",
+    "THAT WAS ALMOST CONVINCING.",
+    "KEEP LOOKING. SOMEWHERE ELSE."
   ],
   contextual: [
     { eligible: (member) => member.holdsSignal, messages: ["YOU SHOULD PROBABLY PASS THAT ALONG.", "YOU'RE CARRYING SOMETHING."] },
@@ -199,7 +210,7 @@ async function submitPinRequest(path, pin, message, form) {
     accessToken = result.accessToken;
     window.localStorage.setItem(accessTokenKey, accessToken);
     form.reset();
-    renderPassport(result.passport);
+    await transitionToPassport(result.passport);
   } catch (error) { message.textContent = error.message; }
   finally { button.disabled = false; }
 }
@@ -215,6 +226,18 @@ async function requestPinReset() {
 }
 
 function memberPayload(values = {}) { return { cardId, accessToken, ...values }; }
+
+async function transitionToPassport(passport) {
+  const overlay = document.querySelector("#access-transition");
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { renderPassport(passport); return; }
+  overlay.hidden = false;
+  requestAnimationFrame(() => overlay.classList.add("is-dark"));
+  await new Promise((resolve) => window.setTimeout(resolve, 420));
+  renderPassport(passport);
+  overlay.classList.remove("is-dark");
+  await new Promise((resolve) => window.setTimeout(resolve, 600));
+  overlay.hidden = true;
+}
 
 async function checkInEvent(event) {
   event.preventDefault();
@@ -369,8 +392,8 @@ function handleLogoInteraction() {
     return;
   }
   const chance = secureRandom();
-  if (logoEasterEggState.postTaps >= 6 && chance < 0.012 && logoMemberContext.memberName) runPersonalizedSequence();
-  else if (logoEasterEggState.postTaps >= 6 && chance < 0.035) runRareInterruption();
+  if (logoEasterEggState.postTaps >= 6 && chance < 0.012 && logoMemberContext.memberName && blackScreenAvailable("personalized")) runPersonalizedSequence();
+  else if (logoEasterEggState.postTaps >= 6 && chance < 0.035 && availableRareInterruptions().length) runRareInterruption();
   else if (logoEasterEggState.postTaps >= 8 && chance < 0.07) startRunawayLogo();
   else if (chance < 0.2) showLogoWhisper(pickLogoResponse());
 }
@@ -397,6 +420,7 @@ async function runCardRecognitionSequence() {
 }
 
 async function runPersonalizedSequence() {
+  rememberBlackScreen("personalized");
   const token = beginLogoInterruption();
   await setInterruptionBeat(`HELLO, ${logoMemberContext.memberName.toUpperCase()}.`, "", 1900, token);
   await setInterruptionBeat(LOGO_EASTER_EGG.personalized[0], "", 2200, token);
@@ -404,7 +428,10 @@ async function runPersonalizedSequence() {
 }
 
 async function runRareInterruption() {
-  const sequence = LOGO_EASTER_EGG.rareInterruptions[Math.floor(secureRandom() * LOGO_EASTER_EGG.rareInterruptions.length)];
+  const available = availableRareInterruptions();
+  if (!available.length) { showLogoWhisper(pickLogoResponse()); return; }
+  const sequence = available[Math.floor(secureRandom() * available.length)];
+  rememberBlackScreen(sequence.code);
   const token = beginLogoInterruption();
   if (sequence.openingDelay) await waitForInterruption(sequence.openingDelay, token);
   const recordId = makeDecorativeRecordId();
@@ -414,6 +441,21 @@ async function runRareInterruption() {
   }
   const finalMessage = sequence.beats.at(-1).replace("{RECORD_ID}", recordId);
   showFinalInterruptionBeat(finalMessage, "", token);
+}
+
+function availableRareInterruptions() {
+  return LOGO_EASTER_EGG.rareInterruptions.filter((sequence) => blackScreenAvailable(sequence.code));
+}
+
+function blackScreenAvailable(code) {
+  try {
+    const lastSeen = Number(localStorage.getItem(`justbaila-logo-black-screen:v1:${cardId}:${code}`) || 0);
+    return !lastSeen || Date.now() - lastSeen >= BLACK_SCREEN_COOLDOWN_MS;
+  } catch { return true; }
+}
+
+function rememberBlackScreen(code) {
+  try { localStorage.setItem(`justbaila-logo-black-screen:v1:${cardId}:${code}`, String(Date.now())); } catch {}
 }
 
 function waitForInterruption(duration, token) {

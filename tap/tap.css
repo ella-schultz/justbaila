@@ -783,6 +783,10 @@
 }
 
 body.archive-open { overflow: hidden; }
+.access-transition[hidden] { display: none; }
+.access-transition { position: fixed; inset: 0; z-index: 120; background: #020102; opacity: 0; pointer-events: none; transition: opacity 420ms ease; }
+.access-transition.is-dark { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .access-transition { transition: none; } }
 .pin-forgot { margin-top: 1rem; border: 0; border-bottom: 1px solid rgba(217,181,109,.35); padding: .35rem 0; color: var(--gold); background: transparent; cursor: pointer; font: 600 .68rem Inter,sans-serif; letter-spacing: .1em; text-transform: uppercase; }
 .pin-forgot:focus-visible { outline: 1px solid var(--rose-soft); outline-offset: 5px; }
 .pin-reset-note { max-width: 480px; margin-top: .9rem; color: var(--muted); font-size: .78rem; }
