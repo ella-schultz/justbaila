@@ -2,6 +2,8 @@ const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const API_BASE_URL = "https://justbaila-inner-circle-api.justbaila-inner-circle.workers.dev";
 const cardId = new URLSearchParams(window.location.search).get("id")?.trim().toUpperCase() || "";
 const accessTokenKey = `justbaila-card-session:v1:${cardId}`;
+const redButtonPressedKey = `justbaila-red-button:v1:${cardId}`;
+const secretKeyUsedKey = `justbaila-secret-key:v3:${cardId}`;
 let accessToken = window.localStorage.getItem(accessTokenKey) || "";
 let currentUndergroundLevel = null;
 let currentTechniqueLab = null;
@@ -34,12 +36,22 @@ const LOGO_EASTER_EGG = {
     "YOUR PERSISTENCE HAS BEEN NOTED.",
     "SOME DOORS STAY CLOSED.",
     "THAT WAS ALMOST CONVINCING.",
-    "KEEP LOOKING. SOMEWHERE ELSE."
+    "KEEP LOOKING. SOMEWHERE ELSE.",
+    "YOU HAVE THE ENERGY OF SOMEONE WHO PUSHES ELEVATOR BUTTONS TWICE.",
+    "THE LOGO IS NOT GOING TO TEXT YOU BACK.",
+    "THIS IS WHY BUTTONS HAVE TRUST ISSUES.",
+    "YOU'RE VERY COMMITTED TO HAVING NO PLAN.",
+    "YOUR CURIOSITY HAS OUTPACED YOUR DIGNITY.",
+    "WE ADMIRE THE CONFIDENCE. NOT THE JUDGMENT.",
+    "YOU CLICK LIKE THERE'S A PRIZE. THERE ISN'T.",
+    "THE LOGO REMEMBERS EVERY DESPERATE TAP.",
+    "YOU'VE MADE THIS WEIRD FOR BOTH OF US.",
+    "THAT TAP HAD BIG 'MAYBE THIS TIME' ENERGY."
   ],
   contextual: [
     { eligible: (member) => member.holdsSignal, messages: ["YOU SHOULD PROBABLY PASS THAT ALONG.", "YOU'RE CARRYING SOMETHING."] },
     { eligible: (member) => member.hasPrivateAssignment, messages: ["DON'T YOU HAVE SOMETHING TO DO?"] },
-    { eligible: (member) => member.missionCount === 0, messages: ["YOU'VE DONE A LOT OF CLICKING FOR SOMEONE WITH ZERO COMPLETED MISSIONS."] },
+    { eligible: (member) => member.missionCount === 0, chance: 0.04, messages: ["YOU'VE DONE A LOT OF CLICKING FOR SOMEONE WITH ZERO COMPLETED MISSIONS."] },
     { eligible: (member) => member.isInstructor, messages: ["YOU'RE SUPPOSED TO BE SETTING AN EXAMPLE."] },
     { eligible: (member) => member.established, messages: ["YOU'VE BEEN HERE LONG ENOUGH TO KNOW BETTER."] }
   ],
@@ -53,7 +65,29 @@ const LOGO_EASTER_EGG = {
   runaway: { start: "FINE.", end: "THIS IS EMBARRASSING FOR BOTH OF US.", moves: 3 }
 };
 
-const logoEasterEggState = { taps: 0, postTaps: 0, runawayMoves: 0, busy: false, timers: [], sequenceToken: 0, pendingTiltTimer: null };
+const logoEasterEggState = { taps: 0, postTaps: 0, runawayMoves: 0, eyesActive: false, busy: false, timers: [], sequenceToken: 0, pendingTiltTimer: null };
+const PRIVATE_ACCESS_JOKES = [
+  "Knock knock.\nWho’s there?\nControl freak.\nCon—\nOkay, now you say, ‘Control freak who?’",
+  "Knock knock.\nWho’s there?\nCow says.\nCow says who?\nNo. A cow says moo.",
+  "Knock knock.\nWho’s there?\nNobel.\nNobel who?\nNo bell. That’s why I knocked.",
+  "Knock knock.\nWho’s there?\nInterrupting cow.\nInterrupting cow wh—\nMOO.",
+  "Knock knock.\nWho’s there?\nTank.\nTank who?\nYou’re welcome.",
+  "Knock knock.\nWho’s there?\nLettuce.\nLettuce who?\nLettuce in. It’s weird out here.",
+  "Knock knock.\nWho’s there?\nA little old lady.\nA little old lady who?\nWow. I didn’t know you could yodel.",
+  "Knock knock.\nWho’s there?\nOpportunity.\nOpportunity who?\nThat’s impossible. Opportunity only knocks once.",
+  "Knock knock.\nWho’s there?\nBroken pencil.\nBroken pencil who?\nNever mind. It’s pointless.",
+  "Knock knock.\nWho’s there?\nCargo.\nCargo who?\nCar go beep beep."
+];
+let lastPrivateAccessJoke = -1;
+let privateAccessJokeTimer = null;
+let keyDoorTimers = [];
+let milestoneAsideIndex = 0;
+const MILESTONE_ASIDE_MESSAGES = [
+  "I mean, that's on me. I don't know what I expected.",
+  "We're done here.",
+  "Ella didn't even tell me what to put here.",
+  "Please go dance."
+];
 
 const states = {
   loading: document.querySelector("#loading-state"),
@@ -89,6 +123,22 @@ const membershipInvitationForm = document.querySelector("#membership-invitation-
 const undergroundLogo = document.querySelector("#underground-logo-trigger");
 const archiveTrigger = document.querySelector("#archive-trigger");
 const archiveRoom = document.querySelector("#archive-room");
+const archiveKeypadRoom = document.querySelector("#archive-keypad-room");
+const archiveKeypadDisplay = document.querySelector("#archive-keypad-display");
+const archiveKeypadResult = document.querySelector("#archive-keypad-result");
+let archiveKeypadCode = "";
+const privateAccessTrigger = document.querySelector("#private-access-trigger");
+const privateAccessJoke = document.querySelector("#private-access-joke");
+const heroPreaccessCopy = document.querySelector("#hero-preaccess-copy");
+const heroMemberCopy = document.querySelector("#hero-member-copy");
+const undergroundWordTrigger = document.querySelector("#underground-word-trigger");
+const caveRoom = document.querySelector("#cave-room");
+const caveLight = document.querySelector("#cave-light");
+const caveBlackout = document.querySelector("#cave-blackout");
+const redButtonRoom = document.querySelector("#red-button-room");
+const redButtonMessage = document.querySelector("#red-button-message");
+const deepScrollRoom = document.querySelector("#deep-scroll-room");
+const keyDoorRoom = document.querySelector("#key-door-room");
 
 claimForm.addEventListener("submit", claimPassport);
 pinSetupForm.addEventListener("submit", setupPin);
@@ -109,15 +159,193 @@ undergroundDoor.addEventListener("click", tryDoor);
 nominationForm.addEventListener("submit", submitMembershipNomination);
 membershipInvitationForm.addEventListener("submit", submitMembershipInvitation);
 undergroundLogo.addEventListener("click", handleLogoInteraction);
+privateAccessTrigger.addEventListener("click", revealPrivateAccessJoke);
+undergroundWordTrigger.addEventListener("click", openCaveRoom);
+caveLight.addEventListener("click", extinguishCaveLight);
+document.querySelector("#cave-return").addEventListener("click", closeCaveRoom);
+document.querySelector("#tiny-red-button").addEventListener("click", openRedButtonRoom);
+document.querySelector("#red-button-no").addEventListener("click", closeRedButtonRoom);
+document.querySelector("#red-button-back").addEventListener("click", closeRedButtonRoom);
+document.querySelector("#red-button-yes").addEventListener("click", confirmRedButtonAgain);
+document.querySelector("#red-button-sure").addEventListener("click", pressRedButton);
+document.querySelector("#red-button-return").addEventListener("click", closeRedButtonRoom);
+document.querySelector("#deep-scroll-trigger").addEventListener("click", openDeepScrollRoom);
+document.querySelector("#deep-scroll-return").addEventListener("click", closeDeepScrollRoom);
+document.querySelector("#tracker-secret-key").addEventListener("click", openKeyDoorRoom);
+document.querySelector("#key-door-return").addEventListener("click", closeKeyDoorRoom);
+document.querySelector("#milestone-aside").addEventListener("click", advanceMilestoneAside);
 archiveTrigger.addEventListener("click", openArchive);
 document.querySelector("#archive-close").addEventListener("click", closeArchive);
 archiveRoom.addEventListener("click", (event) => { if (event.target === archiveRoom) closeArchive(); });
-document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !archiveRoom.hidden) closeArchive(); });
+document.querySelector("#archive-secret-door").addEventListener("click", openArchiveKeypad);
+document.querySelectorAll("[data-archive-digit]").forEach((button) => button.addEventListener("click", () => enterArchiveDigit(button.dataset.archiveDigit)));
+document.querySelector("#archive-keypad-clear").addEventListener("click", clearArchiveKeypad);
+document.querySelector("#archive-keypad-enter").addEventListener("click", submitArchiveKeypad);
+archiveKeypadResult.addEventListener("click", closeArchiveKeypadResult);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!archiveKeypadResult.hidden) closeArchiveKeypadResult();
+  else if (!archiveKeypadRoom.hidden) closeArchiveKeypad();
+  else if (!keyDoorRoom.hidden) closeKeyDoorRoom();
+  else if (!deepScrollRoom.hidden) closeDeepScrollRoom();
+  else if (!redButtonRoom.hidden) closeRedButtonRoom();
+  else if (!caveRoom.hidden) closeCaveRoom();
+  else if (!archiveRoom.hidden) closeArchive();
+});
 document.querySelector("#interruption-return").addEventListener("click", closeLogoInterruption);
 window.addEventListener("pagehide", resetLogoEffects);
 window.addEventListener("hashchange", resetLogoEffects);
 window.addEventListener("hashchange", handleDoorRoute);
 loadPassport();
+
+function revealPrivateAccessJoke() {
+  let jokeIndex = Math.floor(Math.random() * PRIVATE_ACCESS_JOKES.length);
+  if (PRIVATE_ACCESS_JOKES.length > 1 && jokeIndex === lastPrivateAccessJoke) jokeIndex = (jokeIndex + 1) % PRIVATE_ACCESS_JOKES.length;
+  lastPrivateAccessJoke = jokeIndex;
+  window.clearTimeout(privateAccessJokeTimer);
+  privateAccessJoke.textContent = PRIVATE_ACCESS_JOKES[jokeIndex];
+  privateAccessJoke.classList.add("is-visible");
+  privateAccessJokeTimer = window.setTimeout(() => privateAccessJoke.classList.remove("is-visible"), 9000);
+}
+
+function openCaveRoom() {
+  caveRoom.hidden = false;
+  caveRoom.classList.remove("is-dark");
+  caveBlackout.hidden = true;
+  document.body.classList.add("cave-room-open");
+  caveLight.focus({ preventScroll: true });
+}
+
+function extinguishCaveLight() {
+  caveRoom.classList.add("is-dark");
+  caveBlackout.hidden = false;
+  window.setTimeout(() => document.querySelector("#cave-return").focus({ preventScroll: true }), 3200);
+}
+
+function closeCaveRoom() {
+  caveRoom.hidden = true;
+  caveRoom.classList.remove("is-dark");
+  caveBlackout.hidden = true;
+  document.body.classList.remove("cave-room-open");
+  undergroundWordTrigger.focus({ preventScroll: true });
+}
+
+function updateRedButtonState() {
+  let pressed = false;
+  try { pressed = window.localStorage.getItem(redButtonPressedKey) === "pressed"; } catch {}
+  document.querySelector("#tiny-red-button").hidden = pressed;
+  document.querySelector("#red-button-used").hidden = !pressed;
+}
+
+function openRedButtonRoom() {
+  redButtonMessage.textContent = "Are you sure?";
+  document.querySelector("#red-button-first-actions").hidden = false;
+  document.querySelector("#red-button-second-actions").hidden = true;
+  document.querySelector("#red-button-dialog").hidden = false;
+  document.querySelector("#red-button-result").hidden = true;
+  redButtonRoom.classList.remove("is-black");
+  redButtonRoom.hidden = false;
+  document.body.classList.add("red-button-room-open");
+  document.querySelector("#red-button-no").focus({ preventScroll: true });
+}
+
+function confirmRedButtonAgain() {
+  redButtonMessage.textContent = "Seriously?";
+  document.querySelector("#red-button-first-actions").hidden = true;
+  document.querySelector("#red-button-second-actions").hidden = false;
+  document.querySelector("#red-button-back").focus({ preventScroll: true });
+}
+
+function pressRedButton() {
+  try { window.localStorage.setItem(redButtonPressedKey, "pressed"); } catch {}
+  document.querySelector("#red-button-dialog").hidden = true;
+  redButtonRoom.classList.add("is-black");
+  window.setTimeout(() => {
+    document.querySelector("#red-button-result").hidden = false;
+    document.querySelector("#red-button-return").focus({ preventScroll: true });
+  }, 2000);
+}
+
+function closeRedButtonRoom() {
+  redButtonRoom.hidden = true;
+  redButtonRoom.classList.remove("is-black");
+  document.querySelector("#red-button-result").hidden = true;
+  document.body.classList.remove("red-button-room-open");
+  updateRedButtonState();
+  const target = document.querySelector("#tiny-red-button");
+  if (!target.hidden) target.focus({ preventScroll: true });
+}
+
+function openDeepScrollRoom() {
+  deepScrollRoom.hidden = false;
+  deepScrollRoom.scrollTop = 0;
+  document.body.classList.add("deep-scroll-room-open");
+  deepScrollRoom.focus({ preventScroll: true });
+}
+
+function closeDeepScrollRoom() {
+  deepScrollRoom.hidden = true;
+  deepScrollRoom.scrollTop = 0;
+  document.body.classList.remove("deep-scroll-room-open");
+  document.querySelector("#deep-scroll-trigger").focus({ preventScroll: true });
+}
+
+function updateSecretKeyState() {
+  let used = false;
+  try { used = window.localStorage.getItem(secretKeyUsedKey) === "used"; } catch {}
+  document.querySelector("#tracker-secret-key").hidden = used;
+}
+
+function openKeyDoorRoom() {
+  try { window.localStorage.setItem(secretKeyUsedKey, "used"); } catch {}
+  updateSecretKeyState();
+  keyDoorTimers.forEach(window.clearTimeout);
+  keyDoorTimers = [];
+  keyDoorRoom.classList.remove("is-playing", "door-visible", "door-open");
+  document.querySelector("#key-door-message").hidden = true;
+  keyDoorRoom.hidden = false;
+  document.body.classList.add("key-door-room-open");
+  playKeyClick();
+  requestAnimationFrame(() => keyDoorRoom.classList.add("is-playing"));
+  keyDoorTimers.push(window.setTimeout(() => keyDoorRoom.classList.add("door-visible"), 1400));
+  keyDoorTimers.push(window.setTimeout(() => keyDoorRoom.classList.add("door-open"), 2400));
+  keyDoorTimers.push(window.setTimeout(() => {
+    document.querySelector("#key-door-message").hidden = false;
+    document.querySelector("#key-door-return").focus({ preventScroll: true });
+  }, 3400));
+}
+
+function closeKeyDoorRoom() {
+  keyDoorTimers.forEach(window.clearTimeout);
+  keyDoorTimers = [];
+  keyDoorRoom.hidden = true;
+  keyDoorRoom.classList.remove("is-playing", "door-visible", "door-open");
+  document.querySelector("#key-door-message").hidden = true;
+  document.body.classList.remove("key-door-room-open");
+}
+
+function playKeyClick() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.setValueAtTime(920, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(310, context.currentTime + .045);
+    gain.gain.setValueAtTime(.035, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + .055);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + .06);
+  } catch {}
+}
+
+function advanceMilestoneAside() {
+  const button = document.querySelector("#milestone-aside");
+  button.textContent = MILESTONE_ASIDE_MESSAGES[Math.min(milestoneAsideIndex, MILESTONE_ASIDE_MESSAGES.length - 1)];
+  milestoneAsideIndex = Math.min(milestoneAsideIndex + 1, MILESTONE_ASIDE_MESSAGES.length - 1);
+}
 
 async function loadPassport() {
   if (!CARD_ID_PATTERN.test(cardId)) {
@@ -331,6 +559,8 @@ function renderPassport(passport) {
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
   renderTechniqueLab(currentTechniqueLab);
+  updateRedButtonState();
+  updateSecretKeyState();
   showState("passport", "Access granted");
   renderMembershipAccess(passport.membershipAccess || {});
   accessSeal.hidden = !privateAssignment;
@@ -345,7 +575,7 @@ function renderPassport(passport) {
 }
 
 function handleLogoInteraction() {
-  if (!logoMemberContext || logoEasterEggState.busy) return;
+  if (!logoMemberContext || logoEasterEggState.busy || logoEasterEggState.eyesActive) return;
   if (logoEasterEggState.runawayMoves > 0) {
     moveRunawayLogo();
     return;
@@ -391,15 +621,19 @@ function handleLogoInteraction() {
     showLogoWhisper("YOU AGAIN.");
     return;
   }
+  if (logoEasterEggState.postTaps >= 5 && secureRandom() < 0.02) {
+    startWatchingEyes();
+    return;
+  }
   const chance = secureRandom();
   if (logoEasterEggState.postTaps >= 6 && chance < 0.012 && logoMemberContext.memberName && blackScreenAvailable("personalized")) runPersonalizedSequence();
   else if (logoEasterEggState.postTaps >= 6 && chance < 0.035 && availableRareInterruptions().length) runRareInterruption();
   else if (logoEasterEggState.postTaps >= 8 && chance < 0.07) startRunawayLogo();
-  else if (chance < 0.2) showLogoWhisper(pickLogoResponse());
+  else if (chance < 0.55) showLogoWhisper(pickLogoResponse());
 }
 
 function pickLogoResponse() {
-  const eligible = LOGO_EASTER_EGG.contextual.filter((response) => response.eligible(logoMemberContext)).flatMap((response) => response.messages);
+  const eligible = LOGO_EASTER_EGG.contextual.filter((response) => response.eligible(logoMemberContext) && (response.chance === undefined || secureRandom() < response.chance)).flatMap((response) => response.messages);
   const pool = eligible.length && secureRandom() < 0.55 ? eligible : LOGO_EASTER_EGG.generic;
   return pool[Math.floor(secureRandom() * pool.length)];
 }
@@ -410,6 +644,18 @@ function showLogoWhisper(message, duration = 2600) {
   whisper.classList.add("is-visible");
   scheduleLogoTask(() => whisper.classList.remove("is-visible"), duration);
   scheduleLogoTask(() => { if (!whisper.classList.contains("is-visible")) whisper.textContent = ""; }, duration + 250);
+}
+
+function startWatchingEyes() {
+  logoEasterEggState.eyesActive = true;
+  undergroundLogo.classList.remove("logo-flicker");
+  undergroundLogo.classList.add("logo-eyes");
+  undergroundLogo.setAttribute("aria-label", "Something is watching");
+  scheduleLogoTask(() => {
+    undergroundLogo.classList.remove("logo-eyes");
+    undergroundLogo.setAttribute("aria-label", "JustBaila Underground");
+    logoEasterEggState.eyesActive = false;
+  }, 60000);
 }
 
 async function runCardRecognitionSequence() {
@@ -537,9 +783,11 @@ function resetLogoEffects(invalidateSequence = true) {
   logoEasterEggState.timers = [];
   logoEasterEggState.busy = false;
   logoEasterEggState.runawayMoves = 0;
+  logoEasterEggState.eyesActive = false;
   logoEasterEggState.pendingTiltTimer = null;
   undergroundLogo.style.transform = "";
-  undergroundLogo.classList.remove("logo-flicker", "logo-runaway", "logo-discovery-tilted", "logo-discovery-shifted", "logo-discovery-marked");
+  undergroundLogo.classList.remove("logo-flicker", "logo-runaway", "logo-eyes", "logo-discovery-tilted", "logo-discovery-shifted", "logo-discovery-marked");
+  undergroundLogo.setAttribute("aria-label", "JustBaila Underground");
   const whisper = document.querySelector("#logo-whisper");
   whisper.classList.remove("is-visible");
   whisper.textContent = "";
@@ -1061,6 +1309,46 @@ function closeArchive() {
   archiveTrigger.focus({ preventScroll: true });
 }
 
+function openArchiveKeypad() {
+  archiveKeypadCode = "";
+  updateArchiveKeypadDisplay();
+  archiveKeypadRoom.hidden = false;
+  document.querySelector('[data-archive-digit="1"]').focus({ preventScroll: true });
+}
+
+function enterArchiveDigit(digit) {
+  if (archiveKeypadCode.length >= 12) return;
+  archiveKeypadCode += digit;
+  updateArchiveKeypadDisplay();
+}
+
+function clearArchiveKeypad() {
+  archiveKeypadCode = "";
+  updateArchiveKeypadDisplay();
+}
+
+function updateArchiveKeypadDisplay() {
+  archiveKeypadDisplay.textContent = archiveKeypadCode ? "• ".repeat(archiveKeypadCode.length).trim() : "— — — —";
+}
+
+function submitArchiveKeypad() {
+  archiveKeypadRoom.hidden = true;
+  archiveRoom.hidden = true;
+  archiveKeypadResult.hidden = false;
+  archiveKeypadResult.focus({ preventScroll: true });
+}
+
+function closeArchiveKeypad() {
+  archiveKeypadRoom.hidden = true;
+  document.querySelector("#archive-secret-door").focus({ preventScroll: true });
+}
+
+function closeArchiveKeypadResult() {
+  archiveKeypadResult.hidden = true;
+  archiveRoom.hidden = false;
+  document.querySelector("#archive-secret-door").focus({ preventScroll: true });
+}
+
 function makeArchiveFile(entry) {
   const article = document.createElement("article");
   article.className = `archive-file archive-file-${entry.type || "text"}`;
@@ -1270,9 +1558,22 @@ function showKeyAward(transaction) {
 function showState(activeState, label) {
   Object.entries(states).forEach(([name, element]) => { element.hidden = name !== activeState; });
   gatedContent.forEach((section) => { section.hidden = activeState !== "passport"; });
+  updateHeroCopy(activeState);
   accessSeal.hidden = true;
   accessSeal.classList.remove("has-private-assignment");
   accessLabel.textContent = label;
+}
+
+function updateHeroCopy(activeState) {
+  const preaccessCopy = {
+    claim: "A place has been held for you.",
+    pinSetup: "The door remembers this card.",
+    pin: "The door remembers this card."
+  };
+  const memberAccessOpen = activeState === "passport";
+  heroPreaccessCopy.textContent = preaccessCopy[activeState] || "Following the signal.";
+  heroPreaccessCopy.hidden = memberAccessOpen;
+  heroMemberCopy.hidden = !memberAccessOpen;
 }
 
 function formatDate(value) {

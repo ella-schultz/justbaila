@@ -13,8 +13,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
-  <link rel="stylesheet" href="tap.css?v=20260924-logo9" />
-  <script src="app.js?v=20260924-logo9" defer></script>
+  <link rel="stylesheet" href="tap.css?v=20260925-archive-door2" />
+  <script src="app.js?v=20260925-archive-door1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
@@ -23,18 +23,19 @@
     <button type="button" class="private-brand underground-logo-trigger" id="underground-logo-trigger" aria-label="JustBaila Underground">
       <img src="../justbaila.png" alt="JustBaila" />
     </button>
-    <p>Private access</p>
+    <button class="private-access-trigger" id="private-access-trigger" type="button">Private access</button>
   </header>
 
   <p class="logo-whisper" id="logo-whisper" role="status" aria-live="polite"></p>
+  <p class="private-access-joke" id="private-access-joke" role="status" aria-live="polite"></p>
 
   <main id="member-content">
     <section class="after-dark-hero tap-hero" aria-labelledby="after-dark-title">
       <div class="glow glow-one" aria-hidden="true"></div>
       <div class="glow glow-two" aria-hidden="true"></div>
       <div class="hero-inner">
-        <p class="eyebrow">JustBaila Underground</p>
-        <h1 id="after-dark-title">Welcome to the <a class="inner-circle-entry" id="inner-circle-entry" href="#the-door" aria-label="Enter the hidden room">inner circle.</a></h1>
+        <p class="eyebrow">JustBaila <button class="underground-word-trigger" id="underground-word-trigger" type="button" aria-label="Enter the Underground cave">Underground</button></p>
+        <h1 id="after-dark-title"><span id="hero-preaccess-copy">Following the signal.</span><span id="hero-member-copy" hidden>Welcome to the <a class="inner-circle-entry" id="inner-circle-entry" href="#the-door" aria-label="Enter the hidden room">inner circle.</a></span></h1>
         <a class="access-seal" id="access-seal" href="#private-assignment" aria-live="polite" hidden>
           <span class="seal-dot" aria-hidden="true"></span>
           <span id="access-label">Following the signal</span>
@@ -122,7 +123,7 @@
             <div><strong id="attendance-count">0</strong><span>Events</span></div>
             <div><strong id="milestone-count">0</strong><span>Milestones</span></div>
             <div><strong id="mission-count">0</strong><span>Missions</span></div>
-            <div class="keys-stat"><strong id="key-count">0</strong><span>Keys</span></div>
+            <div class="keys-stat"><strong id="key-count">0</strong><span>Keys</span><button class="tracker-secret-key" id="tracker-secret-key" type="button" aria-label="A tiny key"><span aria-hidden="true">🗝</span></button></div>
           </div>
           <p class="access-card-meta">Access card <span id="passport-card-number"></span> · Access since <span id="passport-activation-date"></span></p>
         </div>
@@ -256,6 +257,7 @@
           <p class="form-message" id="milestone-claim-message" aria-live="polite"></p>
         </form>
         <div class="milestones-grid" id="milestones-grid"></div>
+        <button class="milestone-aside" id="milestone-aside" type="button">don't click this</button>
       </div>
     </section>
 
@@ -266,6 +268,15 @@
         <p class="rewards-intro">Spend the Keys you earn through Secret Missions. Redemptions are held for you by the JustBaila team.</p>
         <div class="rewards-grid" id="rewards-grid"></div>
       </div>
+    </section>
+
+    <section class="red-button-nook gated-content" id="red-button-nook" aria-label="An obscure corner" hidden>
+      <button class="tiny-red-button" id="tiny-red-button" type="button" aria-label="Unmarked red button"></button>
+      <p id="red-button-used" hidden>You already pressed it.</p>
+    </section>
+
+    <section class="deep-scroll-entry gated-content" aria-label="A quiet way down" hidden>
+      <button class="deep-scroll-trigger" id="deep-scroll-trigger" type="button" aria-label="Go farther down">↓</button>
     </section>
   </main>
 
@@ -278,6 +289,76 @@
         <p>Some things are left here for whoever thinks to look.</p>
       </header>
       <div class="archive-files" id="archive-files"></div>
+      <button class="archive-secret-door" id="archive-secret-door" type="button" aria-label="A very small door"></button>
+    </div>
+  </div>
+
+  <div class="archive-keypad-room" id="archive-keypad-room" role="dialog" aria-modal="true" aria-labelledby="archive-keypad-title" hidden>
+    <div class="archive-keypad-console">
+      <p class="archive-keypad-classification">Restricted entry system</p>
+      <h2 id="archive-keypad-title">Authorized Personnel Only</h2>
+      <output class="archive-keypad-display" id="archive-keypad-display" aria-live="polite">— — — —</output>
+      <div class="archive-keypad-grid" aria-label="Access keypad">
+        <button type="button" data-archive-digit="1">1</button><button type="button" data-archive-digit="2">2</button><button type="button" data-archive-digit="3">3</button>
+        <button type="button" data-archive-digit="4">4</button><button type="button" data-archive-digit="5">5</button><button type="button" data-archive-digit="6">6</button>
+        <button type="button" data-archive-digit="7">7</button><button type="button" data-archive-digit="8">8</button><button type="button" data-archive-digit="9">9</button>
+        <button class="archive-keypad-clear" id="archive-keypad-clear" type="button">Clear</button><button type="button" data-archive-digit="0">0</button><button class="archive-keypad-enter" id="archive-keypad-enter" type="button">Enter</button>
+      </div>
+    </div>
+  </div>
+
+  <button class="archive-keypad-result" id="archive-keypad-result" type="button" aria-label="Return to the Archive" hidden>
+    <span>Honestly, we mostly wanted to see if you'd try.</span>
+  </button>
+
+  <div class="cave-room" id="cave-room" role="dialog" aria-modal="true" aria-label="A hidden cave" hidden>
+    <div class="cave-ceiling" aria-hidden="true"></div>
+    <div class="cave-depth" aria-hidden="true"></div>
+    <button class="cave-light" id="cave-light" type="button" aria-label="Turn off the light">
+      <span class="cave-cord" aria-hidden="true"></span>
+      <span class="cave-bulb" aria-hidden="true"></span>
+    </button>
+    <div class="cave-blackout" id="cave-blackout" hidden>
+      <p>It's dark in here, why'd you turn the light off?</p>
+      <button id="cave-return" type="button">Go back.</button>
+    </div>
+  </div>
+
+  <div class="red-button-room" id="red-button-room" role="dialog" aria-modal="true" aria-labelledby="red-button-message" hidden>
+    <div class="red-button-dialog" id="red-button-dialog">
+      <p id="red-button-message">Are you sure?</p>
+      <div class="red-button-actions" id="red-button-first-actions">
+        <button type="button" id="red-button-no">No</button>
+        <button type="button" id="red-button-yes">Yes</button>
+      </div>
+      <div class="red-button-actions" id="red-button-second-actions" hidden>
+        <button type="button" id="red-button-back">Go back</button>
+        <button type="button" id="red-button-sure">I'm sure</button>
+      </div>
+    </div>
+    <div class="red-button-result" id="red-button-result" hidden>
+      <p><strong>Okay.</strong><br />Button pressed.</p>
+      <button type="button" id="red-button-return">Go back</button>
+    </div>
+  </div>
+
+  <div class="deep-scroll-room" id="deep-scroll-room" role="dialog" aria-modal="true" aria-label="A very long way down" tabindex="-1" hidden>
+    <div class="deep-scroll-space">
+      <p class="deep-scroll-warning">You can stop scrolling.</p>
+      <div class="deep-scroll-ending">
+        <p>I did tell you.</p>
+        <button type="button" id="deep-scroll-return">Go back</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="key-door-room" id="key-door-room" role="dialog" aria-modal="true" aria-label="A key with nowhere to go" hidden>
+    <div class="key-door-glow" aria-hidden="true"></div>
+    <div class="key-door-key" aria-hidden="true">🗝</div>
+    <div class="key-door" aria-hidden="true"><span class="key-door-panel"></span><span class="key-door-knob"></span></div>
+    <div class="key-door-message" id="key-door-message" hidden>
+      <p>This key doesn't go to anything.</p>
+      <button type="button" id="key-door-return">Go back</button>
     </div>
   </div>
 

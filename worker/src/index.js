@@ -104,6 +104,10 @@ export default {
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
         if (url.pathname === "/api/admin/events/set-code") return await setEventCode(body, env, cors);
+        if (url.pathname === "/api/admin/nfc/member") return await getNfcAssignment(body, env, cors);
+        if (url.pathname === "/api/admin/nfc/assign") return await assignNfcCard(body, env, cors);
+        if (url.pathname === "/api/admin/nfc/remove") return await removeNfcCard(body, env, cors);
+        if (url.pathname === "/api/admin/nfc/check-in") return await checkInByNfc(body, env, cors);
         if (url.pathname === "/api/admin/social-checkin/get") return await getAdminSocialCheckin(env, cors);
         if (url.pathname === "/api/admin/social-checkin/update") return await updateSocialCheckin(body, env, cors);
         if (url.pathname === "/api/admin/signals/visibility/get") return await getAdminSignalsVisibility(env, cors);
@@ -1289,6 +1293,75 @@ async function checkInEvent(body, env, cors) {
   return json({ status: "checked_in", eventTitle: event.title, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
 }
 
+async function getNfcAssignment(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Member");
+  const passport = await getPassportById(passportId, env);
+  if (!passport) throw new HttpError(404, "Member not found.");
+  const card = await env.DB.prepare(`
+    SELECT uid, assigned_at FROM passport_nfc_cards
+    WHERE passport_id = ? AND active = 1 LIMIT 1
+  `).bind(passportId).first();
+  return json({ passportId, memberName: passport.member_name, cardNumber: passport.card_number, uid: card?.uid || null, assignedAt: card?.assigned_at || null }, 200, cors);
+}
+
+async function assignNfcCard(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Member");
+  const uid = normalizeNfcUid(body.uid);
+  const passport = await env.DB.prepare(`
+    SELECT p.id AS passport_id, p.member_name, p.status, c.card_number
+    FROM passports p JOIN cards c ON c.id = p.card_id
+    WHERE p.id = ? AND p.status IN ('unclaimed', 'claimed') AND c.disabled_at IS NULL LIMIT 1
+  `).bind(passportId).first();
+  if (!passport) throw new HttpError(404, "Access card not found.");
+  const existing = await env.DB.prepare(`SELECT passport_id FROM passport_nfc_cards WHERE uid = ? LIMIT 1`).bind(uid).first();
+  if (existing && Number(existing.passport_id) !== passportId) throw new HttpError(409, "That physical card is already assigned to another member.");
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE passport_nfc_cards SET active = 0, removed_at = CURRENT_TIMESTAMP WHERE passport_id = ? AND active = 1 AND uid != ?`).bind(passportId, uid),
+    env.DB.prepare(`
+      INSERT INTO passport_nfc_cards (passport_id, uid, active, assigned_at, removed_at)
+      VALUES (?, ?, 1, CURRENT_TIMESTAMP, NULL)
+      ON CONFLICT(uid) DO UPDATE SET active = 1, removed_at = NULL
+    `).bind(passportId, uid)
+  ]);
+  return json({ status: "assigned", passportId, memberName: passport.member_name || null, cardNumber: passport.card_number, uid }, 200, cors);
+}
+
+async function removeNfcCard(body, env, cors) {
+  const passportId = normalizePositiveInteger(body.passportId, "Member");
+  const result = await env.DB.prepare(`
+    UPDATE passport_nfc_cards SET active = 0, removed_at = CURRENT_TIMESTAMP
+    WHERE passport_id = ? AND active = 1 RETURNING uid
+  `).bind(passportId).first();
+  return json({ status: result ? "removed" : "not_assigned", uid: result?.uid || null }, 200, cors);
+}
+
+async function checkInByNfc(body, env, cors) {
+  const eventId = normalizePositiveInteger(body.eventId, "Event");
+  const uid = normalizeNfcUid(body.uid);
+  const physicalCard = await env.DB.prepare(`
+    SELECT pnc.id AS nfc_card_id, p.id AS passport_id, p.member_name, c.card_number
+    FROM passport_nfc_cards pnc
+    JOIN passports p ON p.id = pnc.passport_id
+    JOIN cards c ON c.id = p.card_id
+    WHERE pnc.uid = ? AND pnc.active = 1 AND p.status = 'claimed' AND c.disabled_at IS NULL LIMIT 1
+  `).bind(uid).first();
+  if (!physicalCard) return json({ status: "unknown_card", uid }, 404, cors);
+  const event = await env.DB.prepare(`SELECT id, title, starts_at, location FROM events WHERE id = ? AND active = 1 LIMIT 1`).bind(eventId).first();
+  if (!event) throw new HttpError(404, "Choose an active event.");
+  const existing = await env.DB.prepare(`SELECT id, checked_in_at FROM event_attendance WHERE passport_id = ? AND event_id = ? LIMIT 1`).bind(physicalCard.passport_id, eventId).first();
+  if (existing) return json({ status: "already_checked_in", memberName: physicalCard.member_name, cardNumber: physicalCard.card_number, eventTitle: event.title, checkedInAt: existing.checked_in_at }, 200, cors);
+  const attendance = await env.DB.prepare(`
+    INSERT INTO event_attendance (passport_id, event_id) VALUES (?, ?)
+    ON CONFLICT(passport_id, event_id) DO NOTHING RETURNING id, checked_in_at
+  `).bind(physicalCard.passport_id, eventId).first();
+  if (!attendance) {
+    const duplicate = await env.DB.prepare(`SELECT checked_in_at FROM event_attendance WHERE passport_id = ? AND event_id = ? LIMIT 1`).bind(physicalCard.passport_id, eventId).first();
+    return json({ status: "already_checked_in", memberName: physicalCard.member_name, cardNumber: physicalCard.card_number, eventTitle: event.title, checkedInAt: duplicate.checked_in_at }, 200, cors);
+  }
+  await env.DB.prepare(`INSERT INTO nfc_checkin_audit (attendance_id, nfc_card_id) VALUES (?, ?)`).bind(attendance.id, physicalCard.nfc_card_id).run();
+  return json({ status: "checked_in", memberName: physicalCard.member_name, cardNumber: physicalCard.card_number, eventTitle: event.title, checkedInAt: attendance.checked_in_at }, 201, cors);
+}
+
 async function getAdminSocialCheckin(env, cors) {
   const setting = await env.DB.prepare(`
     SELECT social_checkin_visible FROM invitation_settings WHERE id = 1
@@ -1879,12 +1952,13 @@ async function listMembershipRequests(env, cors) {
 
 async function listAvailableInvitationCards(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT c.id, c.card_number FROM cards c JOIN passports p ON p.card_id = c.id
+    SELECT c.id, c.card_number, p.id AS passport_id FROM cards c JOIN passports p ON p.card_id = c.id
     WHERE p.status = 'unclaimed' AND c.disabled_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM membership_invitations i WHERE i.assigned_card_id = c.id)
+      AND NOT EXISTS(SELECT 1 FROM passport_nfc_cards pnc WHERE pnc.passport_id = p.id AND pnc.active = 1)
     ORDER BY CAST(c.card_number AS INTEGER), c.card_number
   `).all();
-  return json({ cards: (result.results || []).map((card) => ({ cardId: Number(card.id), cardNumber: card.card_number })) }, 200, cors);
+  return json({ cards: (result.results || []).map((card) => ({ cardId: Number(card.id), passportId: Number(card.passport_id), cardNumber: card.card_number })) }, 200, cors);
 }
 
 async function updateMembershipRequest(body, env, cors) {
@@ -2025,6 +2099,12 @@ function normalizeRelayCode(value) {
   const code = String(value || "").trim().toUpperCase();
   if (!RELAY_CODE_PATTERN.test(code)) throw new HttpError(400, "Enter the six-character relay code.");
   return code;
+}
+
+function normalizeNfcUid(value) {
+  const uid = String(value || "").toUpperCase().replace(/[^0-9A-F]/g, "");
+  if (!/^[0-9A-F]{8,20}$/.test(uid) || uid.length % 2 !== 0) throw new HttpError(400, "A valid NFC card UID is required.");
+  return uid;
 }
 
 function randomCode(length) {
