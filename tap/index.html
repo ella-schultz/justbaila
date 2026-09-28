@@ -7,14 +7,15 @@
   <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex" />
   <meta name="referrer" content="no-referrer" />
   <meta name="theme-color" content="#09070b" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://justbaila-inner-circle-api.justbaila-inner-circle.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>JustBaila Underground</title>
   <link rel="icon" type="image/png" href="../justbaila.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
-  <link rel="stylesheet" href="tap.css?v=20260925-archive-door2" />
-  <script src="app.js?v=20260925-archive-door1" defer></script>
+  <link rel="stylesheet" href="tap.css?v=20260928-cave-blackout1" />
+  <script src="app.js?v=20260928-nominations1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
@@ -36,6 +37,7 @@
       <div class="hero-inner">
         <p class="eyebrow">JustBaila <button class="underground-word-trigger" id="underground-word-trigger" type="button" aria-label="Enter the Underground cave">Underground</button></p>
         <h1 id="after-dark-title"><span id="hero-preaccess-copy">Following the signal.</span><span id="hero-member-copy" hidden>Welcome to the <a class="inner-circle-entry" id="inner-circle-entry" href="#the-door" aria-label="Enter the hidden room">inner circle.</a></span></h1>
+        <p class="social-presence" id="social-presence" hidden><strong id="social-presence-count">0</strong> <span id="social-presence-label">members checked in</span></p>
         <a class="access-seal" id="access-seal" href="#private-assignment" aria-live="polite" hidden>
           <span class="seal-dot" aria-hidden="true"></span>
           <span id="access-label">Following the signal</span>
@@ -46,13 +48,24 @@
     <section class="door-room" id="door-room" aria-labelledby="door-room-title" hidden>
       <button class="door-return" id="door-return" type="button">← Return to the Underground</button>
       <div class="door-room-inner">
-        <p class="door-room-title" id="door-room-title">The Door</p>
-        <button class="underground-door" id="underground-door" type="button" aria-describedby="door-response">
-          <span class="door-surface" aria-hidden="true"><span class="door-seam"></span><span class="door-handle"></span></span>
-          <span class="sr-only">Try the locked Door</span>
-        </button>
-        <p class="door-status">Locked</p>
-        <p class="door-response" id="door-response" role="status" aria-live="polite"></p>
+        <div class="door-threshold" id="door-threshold">
+          <p class="door-room-title" id="door-room-title">The Door</p>
+          <button class="underground-door" id="underground-door" type="button" aria-describedby="door-response">
+            <span class="door-surface" aria-hidden="true"><span class="door-seam"></span><span class="door-handle"></span></span>
+            <span class="sr-only">Try the Door</span>
+          </button>
+          <p class="door-status" id="door-status">Clearance unknown</p>
+          <p class="door-response" id="door-response" role="status" aria-live="polite"></p>
+        </div>
+        <section class="workshop-room" id="workshop-room" aria-labelledby="workshop-title" hidden>
+          <header class="workshop-heading">
+            <p class="section-kicker">Restricted training room</p>
+            <h2 id="workshop-title">The Workshop</h2>
+            <p class="workshop-level" id="workshop-level">Workshop I</p>
+            <p>Small experiments for the dance floor. Try them. Notice what changes.</p>
+          </header>
+          <div class="workshop-challenges" id="workshop-challenges"></div>
+        </section>
       </div>
     </section>
 
@@ -113,7 +126,7 @@
             <div>
               <p class="section-kicker">Access granted</p>
               <h2>Welcome, <span id="passport-name"></span>.</h2>
-              <p class="underground-level" id="underground-level">INITIATE</p>
+              <button class="underground-level" id="classifieds-trigger" type="button" aria-label="Open Classifieds"><span id="underground-level">INITIATE</span></button>
               <p class="member-role" id="member-role" hidden>Instructor</p>
               <p class="member-relay-identity">Relay code <strong id="member-relay-code">------</strong></p>
             </div>
@@ -212,7 +225,7 @@
           <article class="membership-action" id="nomination-action" hidden>
             <p class="membership-action-label">Membership nomination</p>
             <h3>Someone opened the door for you.</h3>
-            <p>Now you can do the same.</p>
+            <p>Now you can do the same. You have one nomination. Once it is sent, this access closes.</p>
             <form id="nomination-form">
               <label>Who are you thinking of?<input name="nominee" maxlength="160" required /></label>
               <label>Why them? <span>Optional</span><textarea name="reason" maxlength="600" rows="3"></textarea></label>
@@ -243,6 +256,25 @@
         <h2 id="missions-title">Secret missions</h2>
         <p class="missions-intro">Complete these quiet challenges as you move deeper into the Inner Circle. New missions may appear without warning.</p>
         <div class="missions-grid" id="missions-grid"></div>
+      </div>
+    </section>
+
+    <section class="classifieds-section" id="classifieds" aria-labelledby="classifieds-title" hidden>
+      <div class="classifieds-container">
+        <button class="classifieds-close" id="classifieds-close" type="button">Close ×</button>
+        <header class="classifieds-heading"><p class="section-kicker">Agent channel</p><h2 id="classifieds-title">Classifieds</h2><p>Practice. Exchange. Make the plan. Then take it offline.</p></header>
+        <div class="classifieds-clearance" id="classifieds-clearance" hidden><strong>Agent clearance required</strong></div>
+        <div id="classifieds-interface" hidden>
+          <aside class="classifieds-boundary"><strong>This is not a dating service.</strong><span>Classifieds are for dance practice, skill exchange, and dance-community plans. Anything that appears to be using this board for dating or solicitation will be removed.</span></aside>
+          <div class="classifieds-controls">
+            <details class="classifieds-control"><summary>Post a classified</summary><form id="classified-form"><label>Category<select name="category" required><option value="practice_partner">Practice Partner</option><option value="skill_exchange">Skill Exchange</option><option value="dance_plans">Dance Plans</option><option value="other">Other</option></select></label><label>Short title<input name="title" maxlength="60" required /></label><label>Description<textarea name="description" maxlength="400" rows="3" required></textarea></label><label>Preferred availability <span>Optional</span><input name="availability" maxlength="160" /></label><button type="submit">Post for seven days</button><p class="form-message" id="classified-form-message" aria-live="polite"></p></form></details>
+            <details class="classifieds-control"><summary>Private contact method</summary><form id="classified-contact-form"><label>Contact type<select name="contactType" required><option value="phone">Phone / text</option><option value="instagram">Instagram</option><option value="other">Other</option></select></label><label>Contact information<input name="contactValue" maxlength="120" required /></label><p class="classifieds-privacy">Hidden unless you deliberately share it with a specific respondent.</p><button type="submit">Save private contact</button><p class="form-message" id="classified-contact-message" aria-live="polite"></p></form></details>
+          </div>
+          <section class="classifieds-inbox" id="classifieds-inbox" hidden><p class="section-kicker">Introductions waiting</p><h3>Responses to your Classified</h3><div id="classified-responses"></div></section>
+          <section class="classifieds-contacts" id="classifieds-contacts" hidden><p class="section-kicker">Contact authorized</p><h3>Connections shared with you</h3><div id="classified-contact-shares"></div></section>
+          <div class="classifieds-board" id="classifieds-board"></div>
+          <p class="form-message" id="classifieds-message" aria-live="polite"></p>
+        </div>
       </div>
     </section>
 
@@ -367,6 +399,23 @@
       <p id="interruption-message"></p>
       <p class="interruption-detail" id="interruption-detail"></p>
       <button id="interruption-return" type="button" hidden>Go back.</button>
+    </div>
+  </div>
+
+  <div class="member-intro" id="member-intro" role="dialog" aria-modal="true" aria-labelledby="member-intro-title" hidden>
+    <div class="member-intro-inner">
+      <p class="member-intro-mark" aria-hidden="true">JB</p>
+      <h2 id="member-intro-title">You’re in.</h2>
+      <p class="member-intro-lead">This card is your access to the Underground.</p>
+      <div class="member-intro-copy">
+        <p>Missions will appear.<br />Keys will open things.<br />Signals may come and go.<br />Not everything will explain itself.</p>
+        <p>Explore. Participate. Pay attention.</p>
+        <p>Some things are obvious.<br />Some things are hidden.<br />Some things only happen once.</p>
+        <p>Your card remembers what you find.</p>
+      </div>
+      <p class="member-intro-welcome">Welcome to the Underground.</p>
+      <button id="member-intro-enter" type="button">Enter</button>
+      <p class="member-intro-error" id="member-intro-error" role="alert"></p>
     </div>
   </div>
 

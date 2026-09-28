@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX idx_membership_nominations_one_per_member
+ON membership_nominations(nominator_passport_id);

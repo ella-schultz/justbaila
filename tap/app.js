@@ -11,6 +11,7 @@ let currentMemberName = "";
 let isInstructor = false;
 let selectedInstructorMember = null;
 let currentDoorAccess = null;
+let currentWorkshop = null;
 let doorAttempts = 0;
 let logoMemberContext = null;
 let currentArchiveEntries = [];
@@ -118,6 +119,8 @@ const instructorCheckForm = document.querySelector("#instructor-check-form");
 const doorRoom = document.querySelector("#door-room");
 const innerCircleEntry = document.querySelector("#inner-circle-entry");
 const undergroundDoor = document.querySelector("#underground-door");
+const doorThreshold = document.querySelector("#door-threshold");
+const workshopRoom = document.querySelector("#workshop-room");
 const nominationForm = document.querySelector("#nomination-form");
 const membershipInvitationForm = document.querySelector("#membership-invitation-form");
 const undergroundLogo = document.querySelector("#underground-logo-trigger");
@@ -139,6 +142,14 @@ const redButtonRoom = document.querySelector("#red-button-room");
 const redButtonMessage = document.querySelector("#red-button-message");
 const deepScrollRoom = document.querySelector("#deep-scroll-room");
 const keyDoorRoom = document.querySelector("#key-door-room");
+const memberIntro = document.querySelector("#member-intro");
+const memberIntroEnter = document.querySelector("#member-intro-enter");
+const memberIntroError = document.querySelector("#member-intro-error");
+const classifiedForm = document.querySelector("#classified-form");
+const classifiedContactForm = document.querySelector("#classified-contact-form");
+const classifiedsSection = document.querySelector("#classifieds");
+const classifiedsTrigger = document.querySelector("#classifieds-trigger");
+let memberIntroSeenThisSession = false;
 
 claimForm.addEventListener("submit", claimPassport);
 pinSetupForm.addEventListener("submit", setupPin);
@@ -148,6 +159,11 @@ retryButton.addEventListener("click", loadPassport);
 eventCheckinForm.addEventListener("submit", checkInEvent);
 milestoneClaimForm.addEventListener("submit", claimMilestone);
 document.querySelector("#passport-monogram").addEventListener("click", openTechniqueLab);
+memberIntroEnter.addEventListener("click", completeMemberIntro);
+classifiedForm.addEventListener("submit", createClassified);
+classifiedContactForm.addEventListener("submit", saveClassifiedContact);
+classifiedsTrigger.addEventListener("click", openClassifieds);
+document.querySelector("#classifieds-close").addEventListener("click", closeClassifieds);
 document.querySelector("#technique-return").addEventListener("click", closeTechniqueLab);
 document.querySelector("#technique-enter").addEventListener("click", revealTechniqueInterface);
 document.querySelector("#instructor-member").addEventListener("change", loadInstructorMember);
@@ -191,6 +207,7 @@ document.addEventListener("keydown", (event) => {
   else if (!redButtonRoom.hidden) closeRedButtonRoom();
   else if (!caveRoom.hidden) closeCaveRoom();
   else if (!archiveRoom.hidden) closeArchive();
+  else if (!classifiedsSection.hidden) closeClassifieds();
 });
 document.querySelector("#interruption-return").addEventListener("click", closeLogoInterruption);
 window.addEventListener("pagehide", resetLogoEffects);
@@ -527,6 +544,7 @@ function renderPassport(passport) {
   document.querySelector("#passport-name").textContent = passport.memberName;
   currentMemberName = passport.memberName;
   currentDoorAccess = passport.doorAccess || { state: "locked" };
+  currentWorkshop = passport.workshop || { clearanceGranted: false, challenges: [] };
   currentArchiveEntries = passport.archiveEntries || [];
   isInstructor = Boolean(passport.isInstructor);
   document.querySelector("#member-role").hidden = !isInstructor;
@@ -542,6 +560,11 @@ function renderPassport(passport) {
   document.querySelector("#mission-count").textContent = passport.missionCount;
   document.querySelector("#key-count").textContent = passport.keyBalance;
   document.querySelector("#member-relay-code").textContent = passport.relayCode || "------";
+  const socialPresence = document.querySelector("#social-presence");
+  const socialCount = Number(passport.socialCheckinCount || 0);
+  socialPresence.hidden = !passport.socialCheckinVisible;
+  document.querySelector("#social-presence-count").textContent = socialCount;
+  document.querySelector("#social-presence-label").textContent = socialCount === 1 ? "member checked in" : "members checked in";
   currentTechniqueLab = passport.techniqueLab || { checksAvailable: false, competencies: [] };
   const privateAssignment = (passport.missions || []).find((mission) => mission.privateAssignment && mission.assignmentStatus === "active" && !mission.completed);
   logoMemberContext = {
@@ -558,6 +581,7 @@ function renderPassport(passport) {
   renderRewards(passport.rewards || [], passport.keyBalance);
   renderMilestones(passport.milestones || []);
   renderMissions(passport.missions || []);
+  renderClassifieds(passport.classifieds || { accessGranted: false });
   renderTechniqueLab(currentTechniqueLab);
   updateRedButtonState();
   updateSecretKeyState();
@@ -572,6 +596,44 @@ function renderPassport(passport) {
   if (previousLevel && previousLevel !== passport.undergroundLevel) showLevelUpdate(previousLevel, passport.undergroundLevel);
   else showKeyAward(passport.latestKeyTransaction);
   handleDoorRoute();
+  if (!passport.introSeen && !memberIntroSeenThisSession) showMemberIntro();
+}
+
+function showMemberIntro() {
+  memberIntroError.textContent = "";
+  memberIntroEnter.disabled = false;
+  memberIntroEnter.textContent = "Enter";
+  memberIntro.hidden = false;
+  document.body.classList.add("member-intro-open");
+  window.requestAnimationFrame(() => {
+    memberIntro.classList.add("is-visible");
+    memberIntroEnter.focus();
+  });
+}
+
+async function completeMemberIntro() {
+  memberIntroEnter.disabled = true;
+  memberIntroEnter.textContent = "Entering…";
+  memberIntroError.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/member/intro/seen`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(memberPayload())
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The door did not open. Try again.");
+    memberIntroSeenThisSession = true;
+    memberIntro.classList.remove("is-visible");
+    window.setTimeout(() => {
+      memberIntro.hidden = true;
+      document.body.classList.remove("member-intro-open");
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 520);
+  } catch (error) {
+    memberIntroError.textContent = error.message;
+    memberIntroEnter.disabled = false;
+    memberIntroEnter.textContent = "Enter";
+  }
 }
 
 function handleLogoInteraction() {
@@ -864,6 +926,7 @@ async function submitMembershipNomination(event) {
     if (!response.ok) throw new Error(result.error || "We couldn't send that nomination.");
     nominationForm.reset();
     message.textContent = "SIGNAL SENT // We'll take it from here.";
+    if (result.passport) window.setTimeout(() => renderPassport(result.passport), 900);
   } catch (error) { message.textContent = error.message; }
   finally { button.disabled = false; }
 }
@@ -890,6 +953,10 @@ function showDoorRoom() {
   doorAttempts = 0;
   document.querySelector("#door-response").textContent = "";
   undergroundDoor.classList.remove("door-denied");
+  doorThreshold.hidden = false;
+  workshopRoom.hidden = true;
+  document.querySelector("#door-room-title").textContent = "The Door";
+  document.querySelector("#door-status").textContent = currentDoorAccess.state === "open" ? "Clearance recognized" : "Clearance unknown";
   document.body.classList.add("door-room-open");
   doorRoom.hidden = false;
   doorRoom.scrollIntoView({ block: "start" });
@@ -910,13 +977,119 @@ function handleDoorRoute() {
 }
 
 function tryDoor() {
-  if (currentDoorAccess?.state !== "locked") return;
+  if (currentDoorAccess?.state === "open") {
+    openWorkshop();
+    return;
+  }
   doorAttempts += 1;
-  const responses = ["ACCESS DENIED", "ACCESS DENIED", "STILL LOCKED.", "YES, WE NOTICED."];
-  document.querySelector("#door-response").textContent = responses[doorAttempts - 1] || "NO.";
+  document.querySelector("#door-room-title").textContent = "The Workshop";
+  document.querySelector("#door-status").textContent = "Clearance required";
+  document.querySelector("#door-response").textContent = "";
   undergroundDoor.classList.remove("door-denied");
   void undergroundDoor.offsetWidth;
   undergroundDoor.classList.add("door-denied");
+}
+
+function openWorkshop() {
+  doorThreshold.hidden = true;
+  workshopRoom.hidden = false;
+  document.querySelector("#workshop-level").textContent = currentWorkshop.level || "WORKSHOP I";
+  renderWorkshopChallenges(currentWorkshop.challenges || []);
+  workshopRoom.querySelector("h2").focus?.({ preventScroll: true });
+}
+
+function renderWorkshopChallenges(challenges) {
+  const container = document.querySelector("#workshop-challenges");
+  if (!challenges.length) {
+    const empty = document.createElement("p");
+    empty.className = "workshop-empty";
+    empty.textContent = "The room is quiet. New exercises will appear here.";
+    container.replaceChildren(empty);
+    return;
+  }
+  container.replaceChildren(...challenges.map((challenge, index) => {
+    const article = document.createElement("article");
+    article.className = `workshop-challenge${challenge.completed ? " is-complete" : ""}`;
+    const number = document.createElement("p");
+    number.className = "workshop-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+    const title = document.createElement("h3");
+    title.textContent = challenge.title;
+    const description = document.createElement("p");
+    description.textContent = challenge.description;
+    const meta = document.createElement("p");
+    meta.className = "workshop-meta";
+    meta.textContent = challenge.completed ? "EXPERIMENT COMPLETE" : challenge.verificationRequired ? "VERIFICATION REQUIRED" : "READY";
+    article.append(number, title, description, meta);
+    if (!challenge.completed) article.append(makeWorkshopCompletionForm(challenge));
+    return article;
+  }));
+}
+
+function makeWorkshopCompletionForm(challenge) {
+  const form = document.createElement("form");
+  form.className = "workshop-completion-form";
+  if (challenge.verificationRequired) {
+    const label = document.createElement("label");
+    label.textContent = "Workshop verification code";
+    const input = document.createElement("input");
+    input.name = "verificationCode";
+    input.minLength = 4;
+    input.maxLength = 40;
+    input.autocomplete = "off";
+    input.required = true;
+    label.append(input);
+    form.append(label);
+  }
+  const button = document.createElement("button");
+  button.type = "submit";
+  button.textContent = challenge.verificationRequired ? "Verify experiment" : "Mark complete";
+  const message = document.createElement("p");
+  message.className = "workshop-form-message";
+  message.setAttribute("aria-live", "polite");
+  form.append(button, message);
+  form.addEventListener("submit", (event) => completeWorkshopChallenge(event, challenge));
+  return form;
+}
+
+async function completeWorkshopChallenge(event, challenge) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button");
+  const message = form.querySelector(".workshop-form-message");
+  button.disabled = true;
+  button.textContent = "Recording…";
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/workshop/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(memberPayload({
+        challengeCode: challenge.code,
+        verificationCode: new FormData(form).get("verificationCode")?.toString() || ""
+      }))
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The Workshop did not record that experiment.");
+    renderPassport(result.passport);
+    openWorkshop();
+    if (result.advanced) showWorkshopUnlock(result.unlockedLevel);
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+    button.textContent = challenge.verificationRequired ? "Verify experiment" : "Mark complete";
+  }
+}
+
+function showWorkshopUnlock(level) {
+  const award = document.querySelector("#key-award");
+  award.textContent = `${level} UNLOCKED // NEW EXERCISES AVAILABLE`;
+  award.hidden = false;
+  window.setTimeout(() => award.classList.add("is-visible"), 50);
+  window.setTimeout(() => {
+    award.classList.remove("is-visible");
+    window.setTimeout(() => { award.hidden = true; }, 500);
+  }, 5000);
 }
 
 function showLevelUpdate(previousLevel, nextLevel) {
@@ -1479,6 +1652,253 @@ function renderMissions(missions) {
   }));
 }
 
+function renderClassifieds(classifieds) {
+  const clearance = document.querySelector("#classifieds-clearance");
+  const interfaceElement = document.querySelector("#classifieds-interface");
+  clearance.hidden = Boolean(classifieds.accessGranted);
+  interfaceElement.hidden = !classifieds.accessGranted;
+  if (!classifieds.accessGranted) return;
+  if (classifieds.contact) {
+    classifiedContactForm.elements.contactType.value = classifieds.contact.type;
+    classifiedContactForm.elements.contactValue.value = classifieds.contact.value;
+  }
+  renderClassifiedBoard(classifieds.listings || []);
+  renderClassifiedResponses(classifieds.responses || []);
+  renderClassifiedContacts(classifieds.contacts || []);
+}
+
+function openClassifieds() {
+  classifiedsSection.hidden = false;
+  document.body.classList.add("classifieds-open");
+  document.querySelector("#classifieds-close").focus({ preventScroll: true });
+}
+
+function closeClassifieds() {
+  classifiedsSection.hidden = true;
+  document.body.classList.remove("classifieds-open");
+  classifiedsTrigger.focus({ preventScroll: true });
+}
+
+function renderClassifiedBoard(listings) {
+  const board = document.querySelector("#classifieds-board");
+  if (!listings.length) {
+    const empty = document.createElement("p");
+    empty.className = "classifieds-empty";
+    empty.textContent = "No active Classifieds. The board is quiet.";
+    board.replaceChildren(empty);
+    return;
+  }
+  board.replaceChildren(...listings.map((listing) => {
+    const article = document.createElement("article");
+    article.className = "classified-card";
+    const category = document.createElement("p");
+    category.className = "classified-category";
+    category.textContent = listing.category;
+    const title = document.createElement("h3");
+    title.textContent = listing.title;
+    const description = document.createElement("p");
+    description.className = "classified-description";
+    description.textContent = listing.description;
+    article.append(category, title, description);
+    if (listing.availability) {
+      const availability = document.createElement("p");
+      availability.className = "classified-availability";
+      availability.textContent = listing.availability;
+      article.append(availability);
+    }
+    const byline = document.createElement("p");
+    byline.className = "classified-byline";
+    byline.textContent = `— ${listing.operative} · Posted ${formatDate(listing.postedAt)} · Expires ${formatDate(listing.expiresAt)}`;
+    article.append(byline);
+    const actions = document.createElement("div");
+    actions.className = "classified-actions";
+    if (listing.isOwner) {
+      actions.append(
+        makeClassifiedAction("Position filled", () => updateClassifiedListing(listing.id, "close")),
+        makeClassifiedAction("Remove", () => updateClassifiedListing(listing.id, "remove"), "quiet")
+      );
+    } else if (!listing.hasResponded) {
+      const respond = makeClassifiedAction("Respond", () => toggleClassifiedResponseForm(article));
+      actions.append(respond);
+      article.append(makeClassifiedResponseForm(listing));
+    } else {
+      const sent = document.createElement("span");
+      sent.className = "classified-sent";
+      sent.textContent = "Response sent";
+      actions.append(sent);
+    }
+    actions.append(makeClassifiedAction("Report", () => reportClassified("listing", listing.id), "quiet"));
+    article.append(actions);
+    return article;
+  }));
+}
+
+function makeClassifiedResponseForm(listing) {
+  const form = document.createElement("form");
+  form.className = "classified-response-form";
+  form.hidden = true;
+  const label = document.createElement("label");
+  label.textContent = "Respond to Classified";
+  const textarea = document.createElement("textarea");
+  textarea.name = "message";
+  textarea.maxLength = 150;
+  textarea.rows = 3;
+  textarea.required = true;
+  label.append(textarea);
+  const button = document.createElement("button");
+  button.type = "submit";
+  button.textContent = "Send response";
+  const message = document.createElement("p");
+  message.className = "form-message";
+  form.append(label, button, message);
+  form.addEventListener("submit", (event) => sendClassifiedResponse(event, listing.id));
+  return form;
+}
+
+function toggleClassifiedResponseForm(article) {
+  const form = article.querySelector(".classified-response-form");
+  form.hidden = !form.hidden;
+  if (!form.hidden) form.querySelector("textarea").focus();
+}
+
+function renderClassifiedResponses(responses) {
+  const section = document.querySelector("#classifieds-inbox");
+  const container = document.querySelector("#classified-responses");
+  section.hidden = responses.length === 0;
+  container.replaceChildren(...responses.map((response) => {
+    const article = document.createElement("article");
+    article.className = "classified-response";
+    const label = document.createElement("p");
+    label.className = "classified-category";
+    label.textContent = "Response to your Classified";
+    const heading = document.createElement("h4");
+    heading.textContent = `${response.operative} responded to “${response.listingTitle}”`;
+    const message = document.createElement("blockquote");
+    message.textContent = response.message;
+    article.append(label, heading, message);
+    const actions = document.createElement("div");
+    actions.className = "classified-actions";
+    if (response.status === "pending") {
+      actions.append(
+        makeClassifiedAction("Share contact", () => classifiedResponseAction(response.id, "share_contact")),
+        makeClassifiedAction("Dismiss", () => classifiedResponseAction(response.id, "dismiss"), "quiet")
+      );
+    } else {
+      const shared = document.createElement("span");
+      shared.className = "classified-sent";
+      shared.textContent = "Contact shared";
+      actions.append(shared);
+    }
+    actions.append(makeClassifiedAction("Report", () => reportClassified("response", response.id), "quiet"));
+    article.append(actions);
+    return article;
+  }));
+}
+
+function renderClassifiedContacts(contacts) {
+  const section = document.querySelector("#classifieds-contacts");
+  const container = document.querySelector("#classified-contact-shares");
+  section.hidden = contacts.length === 0;
+  container.replaceChildren(...contacts.map((share) => {
+    const article = document.createElement("article");
+    article.className = "classified-contact-card";
+    const heading = document.createElement("h4");
+    heading.textContent = `${share.operative} has chosen to connect.`;
+    const detail = document.createElement("p");
+    detail.textContent = `Regarding “${share.listingTitle}”`;
+    const contact = document.createElement(share.contact.href ? "a" : "p");
+    contact.className = "classified-contact-link";
+    contact.textContent = share.contact.label;
+    if (share.contact.href) contact.href = share.contact.href;
+    article.append(heading, detail, contact);
+    return article;
+  }));
+}
+
+function makeClassifiedAction(label, handler, style = "primary") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  if (style === "quiet") button.className = "classified-action-quiet";
+  button.addEventListener("click", handler);
+  return button;
+}
+
+async function createClassified(event) {
+  event.preventDefault();
+  const data = new FormData(classifiedForm);
+  const message = document.querySelector("#classified-form-message");
+  await submitClassifiedRequest(classifiedForm, message, "/api/classifieds/create", {
+    category: data.get("category"), title: data.get("title"), description: data.get("description"), availability: data.get("availability")
+  }, "Classified posted.");
+}
+
+async function saveClassifiedContact(event) {
+  event.preventDefault();
+  const data = new FormData(classifiedContactForm);
+  await submitClassifiedRequest(classifiedContactForm, document.querySelector("#classified-contact-message"), "/api/classifieds/contact", {
+    contactType: data.get("contactType"), contactValue: data.get("contactValue")
+  }, "Private contact method saved.", false);
+}
+
+async function sendClassifiedResponse(event, listingId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  await submitClassifiedRequest(form, form.querySelector(".form-message"), "/api/classifieds/respond", {
+    listingId, message: new FormData(form).get("message")
+  }, "Response sent.");
+}
+
+async function updateClassifiedListing(listingId, action) {
+  const message = document.querySelector("#classifieds-message");
+  try {
+    const result = await classifiedApi(`/api/classifieds/${action}`, { listingId });
+    renderPassport(result.passport);
+    message.textContent = result.message || "Classified updated.";
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function classifiedResponseAction(responseId, action) {
+  const message = document.querySelector("#classifieds-message");
+  try {
+    const result = await classifiedApi("/api/classifieds/response-action", { responseId, action });
+    renderPassport(result.passport);
+    message.textContent = action === "share_contact" ? "CONTACT AUTHORIZED" : "Response dismissed.";
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function reportClassified(targetType, targetId) {
+  const reason = window.prompt("Optional note for the JustBaila team:", "");
+  if (reason === null) return;
+  const message = document.querySelector("#classifieds-message");
+  try {
+    await classifiedApi("/api/classifieds/report", { targetType, targetId, reason });
+    message.textContent = "Report sent to the JustBaila team.";
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function submitClassifiedRequest(form, message, path, values, success, reset = true) {
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  message.textContent = "";
+  try {
+    const result = await classifiedApi(path, values);
+    if (reset) form.reset();
+    renderPassport(result.passport);
+    message.textContent = success;
+  } catch (error) { message.textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
+async function classifiedApi(path, values) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(memberPayload(values))
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Classifieds are temporarily unavailable.");
+  return result;
+}
+
 function makeClaimForm(mission) {
   const form = document.createElement("form");
   form.className = "mission-claim-form";
@@ -1495,11 +1915,27 @@ function makeClaimForm(mission) {
     input.required = true;
     label.append(input);
     form.append(label);
+  } else if (mission.relayVerificationRequired) {
+    const note = document.createElement("p");
+    note.className = "mission-verification-note";
+    note.textContent = "Verification required. Ask another active Underground member for their Relay Code.";
+    const label = document.createElement("label");
+    label.textContent = "Relay Code";
+    const input = document.createElement("input");
+    input.name = "relayCode";
+    input.type = "text";
+    input.minLength = 6;
+    input.maxLength = 6;
+    input.autocomplete = "off";
+    input.placeholder = "Enter their Relay Code";
+    input.required = true;
+    label.append(input);
+    form.append(note, label);
   }
   const button = document.createElement("button");
   button.className = "mission-claim-button";
   button.type = "submit";
-  button.textContent = mission.verificationRequired ? "Unlock Keys" : "Claim Keys";
+  button.textContent = mission.relayVerificationRequired ? "Verify & Complete" : mission.verificationRequired ? "Unlock Keys" : "Claim Keys";
   const message = document.createElement("p");
   message.className = "mission-claim-message";
   message.setAttribute("aria-live", "polite");
@@ -1514,6 +1950,7 @@ async function claimMission(event, mission) {
   const button = form.querySelector("button");
   const message = form.querySelector(".mission-claim-message");
   const verificationCode = new FormData(form).get("verificationCode")?.toString() || "";
+  const relayCode = new FormData(form).get("relayCode")?.toString() || "";
   button.disabled = true;
   button.textContent = "Claiming…";
   message.textContent = "";
@@ -1524,17 +1961,28 @@ async function claimMission(event, mission) {
       body: JSON.stringify(memberPayload({
         missionCode: mission.code,
         verificationCode,
+        relayCode,
         idempotencyKey: crypto.randomUUID().replaceAll("-", "")
       }))
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn’t claim this mission.");
     renderPassport(result.passport);
+    if (result.relayVerified) showRelayVerificationSuccess(result.keysAwarded);
   } catch (error) {
     message.textContent = error.message;
     button.disabled = false;
-    button.textContent = mission.verificationRequired ? "Unlock Keys" : "Claim Keys";
+    button.textContent = mission.relayVerificationRequired ? "Verify & Complete" : mission.verificationRequired ? "Unlock Keys" : "Claim Keys";
   }
+}
+
+function showRelayVerificationSuccess(keysAwarded) {
+  const award = document.querySelector("#key-award");
+  const keys = Number(keysAwarded || 0);
+  award.textContent = `CONTACT VERIFIED // MISSION COMPLETE${keys ? ` // +${keys} ${keys === 1 ? "KEY" : "KEYS"}` : ""}`;
+  award.hidden = false;
+  requestAnimationFrame(() => award.classList.add("is-visible"));
+  window.setTimeout(() => award.classList.remove("is-visible"), 4200);
 }
 
 function showKeyAward(transaction) {

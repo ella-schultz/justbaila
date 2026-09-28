@@ -2,7 +2,6 @@ const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
 const RELAY_CODE_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_ATTEMPTS = 40;
 
 export default {
   async fetch(request, env) {
@@ -37,6 +36,30 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/card/pin/reset-request") {
         await enforceRateLimit(request, env);
         return await requestPinReset(await readJson(request), env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/member/intro/seen") {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const passport = await requirePinSession(body, env);
+        return await markMemberIntroSeen(passport, env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/workshop/complete") {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const passport = await requirePinSession(body, env);
+        return await completeWorkshopChallenge(body, passport, env, cors);
+      }
+      if (request.method === "POST" && url.pathname.startsWith("/api/classifieds/")) {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const passport = await requirePinSession(body, env);
+        if (url.pathname === "/api/classifieds/create") return await createClassified(body, passport, env, cors);
+        if (url.pathname === "/api/classifieds/close") return await closeClassified(body, passport, env, cors, false);
+        if (url.pathname === "/api/classifieds/remove") return await closeClassified(body, passport, env, cors, true);
+        if (url.pathname === "/api/classifieds/respond") return await respondToClassified(body, passport, env, cors);
+        if (url.pathname === "/api/classifieds/response-action") return await handleClassifiedResponse(body, passport, env, cors);
+        if (url.pathname === "/api/classifieds/contact") return await saveClassifiedContact(body, passport, env, cors);
+        if (url.pathname === "/api/classifieds/report") return await reportClassifiedContent(body, passport, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/missions/claim") {
         await enforceRateLimit(request, env);
@@ -88,7 +111,9 @@ export default {
         if (url.pathname === "/api/instructor/technique/check") return await recordTechniqueCheck(body, env, cors, instructor);
       }
       if (request.method === "POST" && url.pathname.startsWith("/api/admin/")) {
+        await enforceRateLimit(request, env, "admin", 300, 10 * 60 * 1000);
         await requireAdmin(request, env);
+        await auditSecurityEvent(env, "admin_action", null, url.pathname, "authorized");
         const body = await readJson(request);
         if (url.pathname === "/api/admin/passports/search") return await searchPassports(body.query, env, cors);
         if (url.pathname === "/api/admin/passports/details") return await getAdminPassport(body.passportId, env, cors);
@@ -130,6 +155,13 @@ export default {
         if (url.pathname === "/api/admin/archive/create") return await createArchiveEntry(body, env, cors);
         if (url.pathname === "/api/admin/archive/update") return await updateArchiveEntry(body, env, cors);
         if (url.pathname === "/api/admin/archive/set-active") return await setArchiveEntryActive(body, env, cors);
+        if (url.pathname === "/api/admin/workshop/list") return await listAdminWorkshopChallenges(env, cors);
+        if (url.pathname === "/api/admin/workshop/create") return await createWorkshopChallenge(body, env, cors);
+        if (url.pathname === "/api/admin/workshop/update") return await updateWorkshopChallenge(body, env, cors);
+        if (url.pathname === "/api/admin/workshop/set-active") return await setWorkshopChallengeActive(body, env, cors);
+        if (url.pathname === "/api/admin/classifieds/moderation") return await listClassifiedModeration(env, cors);
+        if (url.pathname === "/api/admin/classifieds/remove") return await adminRemoveClassified(body, env, cors);
+        if (url.pathname === "/api/admin/classifieds/resolve-report") return await resolveClassifiedReport(body, env, cors);
         if (url.pathname === "/api/admin/rewards/redemptions") return await listRewardRedemptions(env, cors);
         if (url.pathname === "/api/admin/rewards/fulfill") return await fulfillReward(body, env, cors);
         if (url.pathname === "/api/admin/invitation/get") return await getAdminInvitation(env, cors);
@@ -146,6 +178,7 @@ export default {
         if (url.pathname === "/api/admin/instructors/list") return await listInstructors(env, cors);
         if (url.pathname === "/api/admin/instructors/set") return await setInstructorRole(body, env, cors);
         if (url.pathname === "/api/admin/membership/list") return await listMembershipRequests(env, cors);
+        if (url.pathname === "/api/admin/membership/grant-nomination") return await grantNominationAccess(body, env, cors);
         if (url.pathname === "/api/admin/membership/update") return await updateMembershipRequest(body, env, cors);
         if (url.pathname === "/api/admin/membership/available-cards") return await listAvailableInvitationCards(env, cors);
       }
@@ -223,10 +256,12 @@ async function unlockCardPin(body, env, cors) {
     const lock = failedAttempts >= 5;
     await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = ?, pin_locked_until = CASE WHEN ? THEN datetime('now', '+15 minutes') ELSE NULL END WHERE id = ?`)
       .bind(lock ? 0 : failedAttempts, lock ? 1 : 0, passport.passport_id).run();
+    await auditSecurityEvent(env, "pin_unlock_failed", passport.passport_id, "/api/card/pin/unlock", lock ? "locked" : "denied", { failedAttempts });
     throw new HttpError(lock ? 429 : 403, lock ? "Too many incorrect attempts. Try again in 15 minutes." : "That PIN is not correct.");
   }
   await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = 0, pin_locked_until = NULL WHERE id = ?`).bind(passport.passport_id).run();
   const accessToken = await createPinSession(passport.passport_id, env);
+  await auditSecurityEvent(env, "pin_unlock_succeeded", passport.passport_id, "/api/card/pin/unlock", "allowed");
   return json({ status: "claimed", accessToken, passport: await buildPublicPassport(passport, env) }, 200, cors);
 }
 
@@ -239,8 +274,12 @@ async function requestPinReset(body, env, cors) {
 
 async function createPinSession(passportId, env) {
   const accessToken = makeRandomToken(32);
-  await env.DB.prepare(`INSERT INTO card_access_sessions (token_hash, passport_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`)
-    .bind(await sha256(accessToken), passportId).run();
+  const tokenHash = await sha256(accessToken);
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM card_access_sessions WHERE expires_at <= CURRENT_TIMESTAMP`),
+    env.DB.prepare(`INSERT INTO card_access_sessions (token_hash, passport_id, expires_at) VALUES (?, ?, datetime('now', '+24 hours'))`).bind(tokenHash, passportId),
+    env.DB.prepare(`DELETE FROM card_access_sessions WHERE passport_id = ? AND token_hash NOT IN (SELECT token_hash FROM card_access_sessions WHERE passport_id = ? ORDER BY created_at DESC LIMIT 5)`).bind(passportId, passportId)
+  ]);
   return accessToken;
 }
 
@@ -257,6 +296,15 @@ async function requirePinSession(body, env) {
   return passport;
 }
 
+async function markMemberIntroSeen(passport, env, cors) {
+  await env.DB.prepare(`
+    UPDATE passports
+    SET underground_intro_seen_at = COALESCE(underground_intro_seen_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(passport.passport_id).run();
+  return json({ status: "seen" }, 200, cors);
+}
+
 async function adminResetPin(body, env, cors) {
   const passportId = normalizePositiveInteger(body.passportId, "Passport");
   await env.DB.batch([
@@ -264,6 +312,7 @@ async function adminResetPin(body, env, cors) {
     env.DB.prepare(`DELETE FROM card_access_sessions WHERE passport_id = ?`).bind(passportId),
     env.DB.prepare(`UPDATE pin_reset_requests SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE passport_id = ? AND status = 'pending'`).bind(passportId)
   ]);
+  await auditSecurityEvent(env, "admin_pin_reset", passportId, "/api/admin/passports/reset-pin", "completed");
   return json({ status: "reset" }, 200, cors);
 }
 
@@ -275,7 +324,7 @@ async function dismissPinReset(body, env, cors) {
 
 async function getPassportByHash(cardHash, env) {
   return env.DB.prepare(`
-    SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date, p.pin_hash, p.pin_salt, p.pin_failed_attempts, p.pin_locked_until,
+    SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date, p.underground_intro_seen_at, p.pin_hash, p.pin_salt, p.pin_failed_attempts, p.pin_locked_until,
       EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
       (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
       (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
@@ -291,10 +340,12 @@ async function buildPublicPassport(passport, env) {
   const membershipAccess = await ensureMembershipCapabilities(passport.passport_id, env);
   const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
   const techniqueLab = await buildTechniqueLab(passport.passport_id, env, false);
-  const doorAccess = getDoorAccess(passport);
+  const workshop = await buildWorkshop(passport.passport_id, Number(passport.mission_count || 0), env);
+  const classifieds = await buildClassifieds(passport, env);
+  const doorAccess = { state: workshop.clearanceGranted ? "open" : "locked" };
   const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult, archiveResult] = await Promise.all([
     env.DB.prepare(`
-      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.counts_as_event, m.scope, m.social_checkin_only,
+      SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.relay_verification_required, m.counts_as_event, m.scope, m.social_checkin_only,
         ma.status AS assignment_status,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
         COALESCE(SUM(CASE WHEN kt.amount > 0 THEN kt.amount ELSE 0 END), 0) AS keys_earned
@@ -323,7 +374,10 @@ async function buildPublicPassport(passport, env) {
       ORDER BY m.sort_order, m.id
     `).bind(passport.passport_id).all(),
     env.DB.prepare(`
-      SELECT kicker, title, description, button_label, button_url, social_checkin_visible, signals_visible, updated_at
+      SELECT kicker, title, description, button_label, button_url, social_checkin_visible, signals_visible, updated_at,
+        (SELECT COUNT(DISTINCT ea.passport_id)
+         FROM event_attendance ea
+         WHERE ea.event_id = (SELECT id FROM events WHERE active = 1 ORDER BY starts_at DESC, id DESC LIMIT 1)) AS social_checkin_count
       FROM invitation_settings WHERE id = 1
     `).first(),
     env.DB.prepare(`
@@ -359,6 +413,7 @@ async function buildPublicPassport(passport, env) {
     cardNumber: passport.card_number,
     memberName: passport.member_name,
     activationDate: passport.activation_date,
+    introSeen: Boolean(passport.underground_intro_seen_at),
     attendanceCount: Number(passport.attendance_count || 0),
     milestoneCount: milestones.filter((milestone) => milestone.achieved).length,
     missionCount: Number(passport.mission_count || 0),
@@ -367,6 +422,8 @@ async function buildPublicPassport(passport, env) {
     relayCode,
     isInstructor: Boolean(passport.is_instructor),
     doorAccess,
+    workshop,
+    classifieds,
     membershipAccess,
     techniqueLab,
     archiveEntries: (archiveResult.results || []).map(toArchiveEntry),
@@ -377,6 +434,7 @@ async function buildPublicPassport(passport, env) {
       receivedAt: signal.last_relayed_at || signal.created_at
     })),
     socialCheckinVisible: Boolean(invitation?.social_checkin_visible),
+    socialCheckinCount: Number(invitation?.social_checkin_count || 0),
     signalsVisible: Boolean(invitation?.signals_visible),
     invitation: invitation ? {
       kicker: invitation.kicker,
@@ -399,6 +457,7 @@ async function buildPublicPassport(passport, env) {
       repeatable: Boolean(mission.repeatable),
       cooldownHours: Number(mission.cooldown_hours || 0),
       verificationRequired: Boolean(mission.verification_required),
+      relayVerificationRequired: Boolean(mission.relay_verification_required),
       countsAsEvent: Boolean(mission.counts_as_event),
       scope: mission.scope,
       privateAssignment: mission.scope === "individual",
@@ -419,8 +478,386 @@ async function buildPublicPassport(passport, env) {
   };
 }
 
-function getDoorAccess(_passport) {
-  return { state: "locked" };
+const CLASSIFIED_CATEGORIES = new Map([
+  ["practice_partner", "Practice Partner"], ["skill_exchange", "Skill Exchange"],
+  ["dance_plans", "Dance Plans"], ["other", "Other"]
+]);
+
+async function buildClassifieds(passport, env) {
+  const previewAccess = await env.DB.prepare(`
+    SELECT 1 AS allowed FROM classified_access_overrides
+    WHERE passport_id = ? AND expires_at > CURRENT_TIMESTAMP LIMIT 1
+  `).bind(passport.passport_id).first();
+  const accessGranted = Number(passport.mission_count || 0) >= 3 || Boolean(previewAccess);
+  if (!accessGranted) return { accessGranted: false, listings: [], responses: [], contacts: [] };
+  await env.DB.prepare(`UPDATE classified_listings SET status = 'expired' WHERE status = 'active' AND expires_at <= CURRENT_TIMESTAMP`).run();
+  const [listings, received, sharedContacts, contact] = await Promise.all([
+    env.DB.prepare(`
+      SELECT cl.id, cl.category, cl.title, cl.description, cl.availability, cl.created_at, cl.expires_at,
+        cl.passport_id = ? AS is_owner, c.card_number,
+        EXISTS(SELECT 1 FROM classified_responses cr WHERE cr.listing_id = cl.id AND cr.responder_passport_id = ?) AS has_responded
+      FROM classified_listings cl JOIN passports p ON p.id = cl.passport_id JOIN cards c ON c.id = p.card_id
+      WHERE cl.status = 'active' AND cl.expires_at > CURRENT_TIMESTAMP ORDER BY cl.created_at DESC
+    `).bind(passport.passport_id, passport.passport_id).all(),
+    env.DB.prepare(`
+      SELECT cr.id, cr.message, cr.status, cr.created_at, cl.title AS listing_title, c.card_number AS responder_card_number
+      FROM classified_responses cr
+      JOIN classified_listings cl ON cl.id = cr.listing_id
+      JOIN passports p ON p.id = cr.responder_passport_id JOIN cards c ON c.id = p.card_id
+      WHERE cl.passport_id = ? AND cr.status IN ('pending', 'contact_shared')
+      ORDER BY cr.created_at DESC
+    `).bind(passport.passport_id).all(),
+    env.DB.prepare(`
+      SELECT cr.id, cl.title AS listing_title, c.card_number AS owner_card_number, cc.contact_type, cc.contact_value
+      FROM classified_responses cr
+      JOIN classified_listings cl ON cl.id = cr.listing_id
+      JOIN passports owner ON owner.id = cl.passport_id JOIN cards c ON c.id = owner.card_id
+      JOIN classified_contacts cc ON cc.passport_id = cl.passport_id
+      WHERE cr.responder_passport_id = ? AND cr.status = 'contact_shared'
+      ORDER BY cr.updated_at DESC
+    `).bind(passport.passport_id).all(),
+    env.DB.prepare(`SELECT contact_type, contact_value FROM classified_contacts WHERE passport_id = ?`).bind(passport.passport_id).first()
+  ]);
+  return {
+    accessGranted: true,
+    contact: contact ? { type: contact.contact_type, value: contact.contact_value } : null,
+    listings: (listings.results || []).map((listing) => ({
+      id: listing.id, category: CLASSIFIED_CATEGORIES.get(listing.category) || "Other", categoryCode: listing.category,
+      title: listing.title, description: listing.description, availability: listing.availability || "",
+      operative: `Operative ${listing.card_number}`, postedAt: listing.created_at, expiresAt: listing.expires_at,
+      isOwner: Boolean(listing.is_owner), hasResponded: Boolean(listing.has_responded)
+    })),
+    responses: (received.results || []).map((response) => ({
+      id: response.id, listingTitle: response.listing_title, message: response.message,
+      operative: `Operative ${response.responder_card_number}`, status: response.status, createdAt: response.created_at
+    })),
+    contacts: (sharedContacts.results || []).map((share) => ({
+      responseId: share.id, listingTitle: share.listing_title, operative: `Operative ${share.owner_card_number}`,
+      contact: formatClassifiedContact(share.contact_type, share.contact_value)
+    }))
+  };
+}
+
+async function requireClassifiedClearance(passport, env) {
+  if (Number(passport.mission_count || 0) >= 3) return;
+  const previewAccess = await env.DB.prepare(`
+    SELECT 1 AS allowed FROM classified_access_overrides
+    WHERE passport_id = ? AND expires_at > CURRENT_TIMESTAMP LIMIT 1
+  `).bind(passport.passport_id).first();
+  if (!previewAccess) throw new HttpError(403, "Agent clearance required.");
+}
+
+async function createClassified(body, passport, env, cors) {
+  await requireClassifiedClearance(passport, env);
+  await env.DB.prepare(`UPDATE classified_listings SET status = 'expired' WHERE passport_id = ? AND status = 'active' AND expires_at <= CURRENT_TIMESTAMP`).bind(passport.passport_id).run();
+  const existing = await env.DB.prepare(`SELECT 1 AS active FROM classified_listings WHERE passport_id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP LIMIT 1`).bind(passport.passport_id).first();
+  if (existing) throw new HttpError(409, "You may have only one active Classified at a time.");
+  const category = String(body.category || "").trim();
+  if (!CLASSIFIED_CATEGORIES.has(category)) throw new HttpError(400, "Choose a valid Classified category.");
+  const title = normalizeMissionText(body.title, "Title", 3, 60);
+  const description = normalizeMissionText(body.description, "Description", 10, 400);
+  const availability = normalizeOptionalText(body.availability, "Availability", 160);
+  await env.DB.prepare(`
+    INSERT INTO classified_listings (id, passport_id, category, title, description, availability, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))
+  `).bind(`classified_${crypto.randomUUID()}`, passport.passport_id, category, title, description, availability).run();
+  return json({ status: "created", passport: await buildPublicPassport(passport, env) }, 201, cors);
+}
+
+async function closeClassified(body, passport, env, cors, remove) {
+  await requireClassifiedClearance(passport, env);
+  const id = String(body.listingId || "").trim();
+  const status = remove ? "removed" : "closed";
+  const result = await env.DB.prepare(`
+    UPDATE classified_listings SET status = ?, closed_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND passport_id = ? AND status = 'active' RETURNING id
+  `).bind(status, id, passport.passport_id).first();
+  if (!result) throw new HttpError(404, "Active Classified not found.");
+  return json({ status, message: remove ? "Classified removed." : "POSITION FILLED // This classified has been closed.", passport: await buildPublicPassport(passport, env) }, 200, cors);
+}
+
+async function respondToClassified(body, passport, env, cors) {
+  await requireClassifiedClearance(passport, env);
+  const listingId = String(body.listingId || "").trim();
+  const message = normalizeMissionText(body.message, "Response", 2, 150);
+  const listing = await env.DB.prepare(`SELECT id, passport_id FROM classified_listings WHERE id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP`).bind(listingId).first();
+  if (!listing) throw new HttpError(404, "That Classified is no longer active.");
+  if (Number(listing.passport_id) === Number(passport.passport_id)) throw new HttpError(400, "You cannot respond to your own Classified.");
+  try {
+    await env.DB.prepare(`INSERT INTO classified_responses (id, listing_id, responder_passport_id, message) VALUES (?, ?, ?, ?)`)
+      .bind(`response_${crypto.randomUUID()}`, listingId, passport.passport_id, message).run();
+  } catch (error) { if (String(error).includes("UNIQUE")) throw new HttpError(409, "You already responded to this Classified."); throw error; }
+  return json({ status: "sent", passport: await buildPublicPassport(passport, env) }, 201, cors);
+}
+
+async function handleClassifiedResponse(body, passport, env, cors) {
+  await requireClassifiedClearance(passport, env);
+  const responseId = String(body.responseId || "").trim();
+  const action = String(body.action || "").trim();
+  if (action !== "dismiss" && action !== "share_contact") throw new HttpError(400, "Choose a valid response action.");
+  if (action === "share_contact") {
+    const contact = await env.DB.prepare(`SELECT 1 AS configured FROM classified_contacts WHERE passport_id = ?`).bind(passport.passport_id).first();
+    if (!contact) throw new HttpError(409, "Add a Classifieds contact method before sharing contact.");
+  }
+  const nextStatus = action === "dismiss" ? "dismissed" : "contact_shared";
+  const result = await env.DB.prepare(`
+    UPDATE classified_responses SET status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND listing_id IN (SELECT id FROM classified_listings WHERE passport_id = ?) AND status = 'pending'
+    RETURNING id
+  `).bind(nextStatus, responseId, passport.passport_id).first();
+  if (!result) throw new HttpError(404, "Pending response not found.");
+  if (action === "share_contact") await auditSecurityEvent(env, "classified_contact_shared", passport.passport_id, "/api/classifieds/response-action", "completed", { responseId });
+  return json({ status: nextStatus, passport: await buildPublicPassport(passport, env) }, 200, cors);
+}
+
+async function saveClassifiedContact(body, passport, env, cors) {
+  await requireClassifiedClearance(passport, env);
+  const contact = normalizeClassifiedContact(body.contactType, body.contactValue);
+  await env.DB.prepare(`
+    INSERT INTO classified_contacts (passport_id, contact_type, contact_value) VALUES (?, ?, ?)
+    ON CONFLICT(passport_id) DO UPDATE SET contact_type = excluded.contact_type, contact_value = excluded.contact_value, updated_at = CURRENT_TIMESTAMP
+  `).bind(passport.passport_id, contact.type, contact.value).run();
+  return json({ status: "saved", passport: await buildPublicPassport(passport, env) }, 200, cors);
+}
+
+async function reportClassifiedContent(body, passport, env, cors) {
+  await requireClassifiedClearance(passport, env);
+  const targetType = String(body.targetType || "").trim();
+  const targetId = String(body.targetId || "").trim();
+  if (targetType !== "listing" && targetType !== "response") throw new HttpError(400, "Choose a valid report target.");
+  const table = targetType === "listing" ? "classified_listings" : "classified_responses";
+  if (!await env.DB.prepare(`SELECT 1 AS found FROM ${table} WHERE id = ? LIMIT 1`).bind(targetId).first()) throw new HttpError(404, "Classified content not found.");
+  const reason = normalizeOptionalText(body.reason, "Report note", 200);
+  await env.DB.prepare(`INSERT INTO classified_reports (id, reporter_passport_id, listing_id, response_id, reason) VALUES (?, ?, ?, ?, ?)`)
+    .bind(`report_${crypto.randomUUID()}`, passport.passport_id, targetType === "listing" ? targetId : null, targetType === "response" ? targetId : null, reason).run();
+  return json({ status: "reported" }, 201, cors);
+}
+
+async function listClassifiedModeration(env, cors) {
+  const [listings, reports] = await Promise.all([env.DB.prepare(`
+    SELECT cl.id, cl.category, cl.title, cl.description, cl.availability, cl.created_at, cl.expires_at,
+      c.card_number, p.member_name,
+      (SELECT COUNT(*) FROM classified_responses cr WHERE cr.listing_id = cl.id) AS response_count,
+      (SELECT COUNT(*) FROM classified_reports r WHERE r.listing_id = cl.id AND r.status = 'pending') AS report_count
+    FROM classified_listings cl
+    JOIN passports p ON p.id = cl.passport_id
+    JOIN cards c ON c.id = p.card_id
+    WHERE cl.status = 'active' AND cl.expires_at > CURRENT_TIMESTAMP
+    ORDER BY cl.created_at DESC LIMIT 100
+  `).all(), env.DB.prepare(`
+    SELECT r.id, r.listing_id, r.response_id, r.reason, r.status, r.created_at, c.card_number AS reporter_card_number,
+      cl.title AS listing_title, cr.message AS response_message
+    FROM classified_reports r JOIN passports p ON p.id = r.reporter_passport_id JOIN cards c ON c.id = p.card_id
+    LEFT JOIN classified_listings cl ON cl.id = COALESCE(r.listing_id, (SELECT listing_id FROM classified_responses WHERE id = r.response_id))
+    LEFT JOIN classified_responses cr ON cr.id = r.response_id
+    ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at DESC LIMIT 100
+  `).all()]);
+  return json({ listings: listings.results || [], reports: reports.results || [] }, 200, cors);
+}
+
+async function adminRemoveClassified(body, env, cors) {
+  const listingId = String(body.listingId || "").trim();
+  const result = await env.DB.prepare(`UPDATE classified_listings SET status = 'removed', closed_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id`).bind(listingId).first();
+  if (!result) throw new HttpError(404, "Classified not found.");
+  return json({ status: "removed" }, 200, cors);
+}
+
+async function resolveClassifiedReport(body, env, cors) {
+  const reportId = String(body.reportId || "").trim();
+  const result = await env.DB.prepare(`UPDATE classified_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending' RETURNING id`).bind(reportId).first();
+  if (!result) throw new HttpError(404, "Pending report not found.");
+  return json({ status: "resolved" }, 200, cors);
+}
+
+function normalizeClassifiedContact(rawType, rawValue) {
+  const type = String(rawType || "").trim();
+  const raw = String(rawValue || "").trim();
+  if (type === "phone") {
+    const value = raw.replace(/[^0-9+]/g, "");
+    if (!/^\+?[0-9]{7,15}$/.test(value)) throw new HttpError(400, "Enter a valid phone number.");
+    return { type, value };
+  }
+  if (type === "instagram") {
+    const value = raw.replace(/^@/, "");
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(value)) throw new HttpError(400, "Enter a valid Instagram username.");
+    return { type, value };
+  }
+  if (type === "other") {
+    if (raw.length < 3 || raw.length > 120) throw new HttpError(400, "Contact information must be between 3 and 120 characters.");
+    return { type, value: raw };
+  }
+  throw new HttpError(400, "Choose a contact method.");
+}
+
+function formatClassifiedContact(type, value) {
+  if (type === "phone") return { label: value, href: `sms:${value}` };
+  if (type === "instagram") return { label: `@${value}`, href: `https://instagram.com/${encodeURIComponent(value)}` };
+  const href = /^https:\/\//i.test(value) ? value : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? `mailto:${value}` : "";
+  return { label: value, href };
+}
+
+const WORKSHOP_LEVEL_NAMES = ["WORKSHOP I", "WORKSHOP II", "WORKSHOP III", "WORKSHOP IV"];
+
+async function buildWorkshop(passportId, missionCount, env) {
+  const previewAccess = missionCount >= 1 ? null : await env.DB.prepare(`SELECT 1 AS allowed FROM workshop_access_overrides WHERE passport_id = ? LIMIT 1`).bind(passportId).first();
+  const clearanceGranted = missionCount >= 1 || Boolean(previewAccess);
+  if (!clearanceGranted) return { clearanceGranted: false, level: null, levelNumber: 0, challenges: [] };
+  await env.DB.prepare(`INSERT OR IGNORE INTO workshop_member_progress (passport_id) VALUES (?)`).bind(passportId).run();
+  const progress = await env.DB.prepare(`SELECT current_level FROM workshop_member_progress WHERE passport_id = ?`).bind(passportId).first();
+  const levelNumber = Number(progress?.current_level || 1);
+  const result = await env.DB.prepare(`
+    SELECT wc.code, wc.title, wc.description, wc.workshop_level, wc.required_for_advance, wc.verification_required,
+      wc.key_reward, wc.sort_order, wco.completed_at
+    FROM workshop_challenges wc
+    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ?
+    WHERE wc.active = 1 ORDER BY wc.workshop_level, wc.sort_order, wc.id
+  `).bind(passportId).all();
+  const allChallenges = result.results || [];
+  return {
+    clearanceGranted: true,
+    level: WORKSHOP_LEVEL_NAMES[levelNumber - 1],
+    levelNumber,
+    challenges: allChallenges.filter((challenge) => Number(challenge.workshop_level) === levelNumber).map((challenge) => ({
+      code: challenge.code,
+      title: challenge.title,
+      description: challenge.description,
+      required: Boolean(challenge.required_for_advance),
+      verificationRequired: Boolean(challenge.verification_required),
+      keyReward: Number(challenge.key_reward || 0),
+      completed: Boolean(challenge.completed_at),
+      completedAt: challenge.completed_at
+    }))
+  };
+}
+
+async function completeWorkshopChallenge(body, passport, env, cors) {
+  const workshop = await buildWorkshop(passport.passport_id, Number(passport.mission_count || 0), env);
+  if (!workshop.clearanceGranted) throw new HttpError(403, "Clearance required.");
+  const code = String(body.challengeCode || "").trim();
+  const challenge = await env.DB.prepare(`
+    SELECT * FROM workshop_challenges WHERE code = ? AND active = 1 AND workshop_level = ? LIMIT 1
+  `).bind(code, workshop.levelNumber).first();
+  if (!challenge) throw new HttpError(404, "Workshop challenge not available.");
+  if (challenge.verification_required) {
+    const verificationCode = normalizeVerificationCode(body.verificationCode);
+    if (!constantTimeEqual(await sha256(verificationCode), challenge.verification_code_hash || "")) throw new HttpError(403, "Verification not accepted.");
+  }
+  const completionId = `workshop_${crypto.randomUUID()}`;
+  const keyReward = Number(challenge.key_reward || 0);
+  const statements = [env.DB.prepare(`
+    INSERT INTO workshop_completions (id, passport_id, challenge_id, verification_method)
+    VALUES (?, ?, ?, ?)
+  `).bind(completionId, passport.passport_id, challenge.id, challenge.verification_required ? "code" : "honor")];
+  if (keyReward > 0) statements.push(env.DB.prepare(`
+    INSERT INTO key_transactions (id, passport_id, amount, transaction_type, reason_type, reason_id, description, created_by)
+    VALUES (?, ?, ?, 'earned', 'adjustment', ?, ?, 'workshop')
+  `).bind(`key_${completionId}`, passport.passport_id, keyReward, completionId, `Workshop challenge: ${challenge.title}`));
+  try { await env.DB.batch(statements); }
+  catch (error) { if (String(error).includes("UNIQUE")) throw new HttpError(409, "This Workshop challenge is already complete."); throw error; }
+  await advanceWorkshopIfReady(passport.passport_id, workshop.levelNumber, env);
+  const refreshed = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
+  const nextWorkshop = await buildWorkshop(passport.passport_id, Number(refreshed.mission_count || 0), env);
+  await auditSecurityEvent(env, "workshop_challenge_completed", passport.passport_id, "/api/workshop/complete", "completed", { challengeId: Number(challenge.id), advanced: nextWorkshop.levelNumber > workshop.levelNumber });
+  return json({
+    status: "completed",
+    advanced: nextWorkshop.levelNumber > workshop.levelNumber,
+    unlockedLevel: nextWorkshop.level,
+    keysAwarded: keyReward,
+    passport: await buildPublicPassport(refreshed, env)
+  }, 201, cors);
+}
+
+async function advanceWorkshopIfReady(passportId, levelNumber, env) {
+  if (levelNumber >= 4) return;
+  const status = await env.DB.prepare(`
+    SELECT COUNT(*) AS required_count,
+      SUM(CASE WHEN wco.id IS NULL THEN 1 ELSE 0 END) AS incomplete_count
+    FROM workshop_challenges wc
+    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ?
+    WHERE wc.active = 1 AND wc.required_for_advance = 1 AND wc.workshop_level = ?
+  `).bind(passportId, levelNumber).first();
+  if (Number(status?.required_count || 0) > 0 && Number(status?.incomplete_count || 0) === 0) {
+    await env.DB.prepare(`
+      UPDATE workshop_member_progress SET current_level = ?, level_updated_at = CURRENT_TIMESTAMP
+      WHERE passport_id = ? AND current_level = ?
+    `).bind(levelNumber + 1, passportId, levelNumber).run();
+  }
+}
+
+async function listAdminWorkshopChallenges(env, cors) {
+  const result = await env.DB.prepare(`
+    SELECT wc.*, COUNT(wco.id) AS completion_count FROM workshop_challenges wc
+    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id
+    GROUP BY wc.id ORDER BY wc.active DESC, wc.workshop_level, wc.sort_order, wc.id
+  `).all();
+  return json({ challenges: (result.results || []).map(toAdminWorkshopChallenge) }, 200, cors);
+}
+
+async function createWorkshopChallenge(body, env, cors) {
+  const challenge = await normalizeWorkshopChallenge(body, null);
+  const slug = challenge.title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "workshop";
+  const code = `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+  await env.DB.prepare(`
+    INSERT INTO workshop_challenges (code, title, description, workshop_level, required_for_advance, verification_required,
+      verification_code_hash, verification_code_display, key_reward, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(code, challenge.title, challenge.description, challenge.level, challenge.required, challenge.verificationRequired,
+    challenge.verificationCodeHash, challenge.verificationCodeDisplay, challenge.keyReward, challenge.sortOrder).run();
+  return json({ status: "created", code }, 201, cors);
+}
+
+async function updateWorkshopChallenge(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const existing = await env.DB.prepare(`SELECT * FROM workshop_challenges WHERE code = ?`).bind(code).first();
+  if (!existing) throw new HttpError(404, "Workshop challenge not found.");
+  const challenge = await normalizeWorkshopChallenge(body, existing);
+  await env.DB.prepare(`
+    UPDATE workshop_challenges SET title = ?, description = ?, workshop_level = ?, required_for_advance = ?,
+      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, key_reward = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE code = ?
+  `).bind(challenge.title, challenge.description, challenge.level, challenge.required, challenge.verificationRequired,
+    challenge.verificationCodeHash, challenge.verificationCodeDisplay, challenge.keyReward, challenge.sortOrder, code).run();
+  return json({ status: "updated" }, 200, cors);
+}
+
+async function setWorkshopChallengeActive(body, env, cors) {
+  const code = String(body.code || "").trim();
+  const active = normalizeBoolean(body.active);
+  const result = await env.DB.prepare(`UPDATE workshop_challenges SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`).bind(active, code).first();
+  if (!result) throw new HttpError(404, "Workshop challenge not found.");
+  return json({ status: active ? "restored" : "deactivated" }, 200, cors);
+}
+
+async function normalizeWorkshopChallenge(body, existing) {
+  const title = normalizeMissionText(body.title, "Challenge title", 3, 100);
+  const description = normalizeMissionText(body.description, "Instructions", 10, 700);
+  const level = Number(body.level);
+  if (!Number.isInteger(level) || level < 1 || level > 4) throw new HttpError(400, "Choose Workshop I, II, III, or IV.");
+  const keyReward = Number(body.keyReward || 0);
+  if (!Number.isInteger(keyReward) || keyReward < 0 || keyReward > 100) throw new HttpError(400, "Key reward must be between 0 and 100.");
+  const sortOrder = Number(body.sortOrder || 0);
+  if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) throw new HttpError(400, "Order must be between 0 and 10,000.");
+  const required = body.required ? 1 : 0;
+  const verificationRequired = body.verificationRequired ? 1 : 0;
+  let verificationCodeHash = existing?.verification_code_hash || null;
+  let verificationCodeDisplay = existing?.verification_code_display || null;
+  if (verificationRequired && String(body.verificationCode || "").trim()) {
+    verificationCodeDisplay = normalizeVerificationCode(body.verificationCode);
+    verificationCodeHash = await sha256(verificationCodeDisplay);
+  }
+  if (verificationRequired && !verificationCodeHash) throw new HttpError(400, "Enter a verification code.");
+  if (!verificationRequired) { verificationCodeHash = null; verificationCodeDisplay = null; }
+  return { title, description, level, required, verificationRequired, verificationCodeHash, verificationCodeDisplay, keyReward, sortOrder };
+}
+
+function toAdminWorkshopChallenge(challenge) {
+  return {
+    code: challenge.code, title: challenge.title, description: challenge.description,
+    level: Number(challenge.workshop_level), required: Boolean(challenge.required_for_advance),
+    verificationRequired: Boolean(challenge.verification_required), verificationCode: challenge.verification_code_display || "",
+    keyReward: Number(challenge.key_reward || 0), sortOrder: Number(challenge.sort_order || 0),
+    active: Boolean(challenge.active), completionCount: Number(challenge.completion_count || 0)
+  };
 }
 
 async function getLifetimeKeysEarned(passportId, env) {
@@ -439,10 +876,14 @@ async function ensureMembershipCapabilities(passportId, env) {
   if (lifetimeKeys >= 25) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO member_capabilities (passport_id, capability) VALUES (?, 'membership_nomination')`).bind(passportId));
   if (lifetimeKeys >= 75) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO member_capabilities (passport_id, capability) VALUES (?, 'membership_invitation')`).bind(passportId));
   if (statements.length) await env.DB.batch(statements);
-  const result = await env.DB.prepare(`SELECT capability, unlocked_at FROM member_capabilities WHERE passport_id = ?`).bind(passportId).all();
+  const [result, nomination] = await Promise.all([
+    env.DB.prepare(`SELECT capability, unlocked_at FROM member_capabilities WHERE passport_id = ?`).bind(passportId).all(),
+    env.DB.prepare(`SELECT submitted_at FROM membership_nominations WHERE nominator_passport_id = ? LIMIT 1`).bind(passportId).first()
+  ]);
   const capabilities = new Map((result.results || []).map((row) => [row.capability, row.unlocked_at]));
   return {
-    canNominate: capabilities.has('membership_nomination'),
+    canNominate: capabilities.has('membership_nomination') && !nomination,
+    nominationUsed: Boolean(nomination),
     canInvite: capabilities.has('membership_invitation'),
     nominationUnlockedAt: capabilities.get('membership_nomination') || null,
     invitationUnlockedAt: capabilities.get('membership_invitation') || null
@@ -462,10 +903,18 @@ async function requireMembershipCapability(rawCardId, capability, env) {
 
 async function submitMembershipNomination(body, env, cors) {
   const passport = await requireMembershipCapability(body.cardId, 'membership_nomination', env);
+  const existing = await env.DB.prepare(`SELECT 1 AS submitted FROM membership_nominations WHERE nominator_passport_id = ? LIMIT 1`).bind(passport.passport_id).first();
+  if (existing) throw new HttpError(409, "Your nomination has already been submitted.");
   const nominee = normalizeMissionText(body.nominee, "Who you are thinking of", 2, 160);
   const reason = normalizeOptionalText(body.reason, "Reason", 600);
-  await env.DB.prepare(`INSERT INTO membership_nominations (id, nominator_passport_id, nominee_description, reason) VALUES (?, ?, ?, ?)`).bind(`nom_${crypto.randomUUID()}`, passport.passport_id, nominee, reason || null).run();
-  return json({ status: "submitted", message: "SIGNAL SENT // We'll take it from here." }, 201, cors);
+  try {
+    await env.DB.prepare(`INSERT INTO membership_nominations (id, nominator_passport_id, nominee_description, reason) VALUES (?, ?, ?, ?)`).bind(`nom_${crypto.randomUUID()}`, passport.passport_id, nominee, reason || null).run();
+  } catch (error) {
+    if (String(error).includes("UNIQUE")) throw new HttpError(409, "Your nomination has already been submitted.");
+    throw error;
+  }
+  const refreshed = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
+  return json({ status: "submitted", message: "SIGNAL SENT // We'll take it from here.", passport: await buildPublicPassport(refreshed, env) }, 201, cors);
 }
 
 async function submitMembershipInvitation(body, env, cors) {
@@ -689,6 +1138,7 @@ async function redeemReward(body, env, cors) {
       }
     }
   }
+  await auditSecurityEvent(env, "reward_redeemed", passport.passport_id, "/api/rewards/redeem", "completed", { rewardId: Number(reward.id), idempotencyKey });
   const refreshed = await getPassportByHash(await sha256(cardId), env);
   return json({ status: "requested", rewardTitle: reward.title, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
 }
@@ -1014,7 +1464,7 @@ async function claimMission(body, env, cors) {
   if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before claiming missions.");
 
   const mission = await env.DB.prepare(`
-    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.verification_code_hash, m.scope, m.social_checkin_only,
+    SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.relay_verification_required, m.verification_code_hash, m.scope, m.social_checkin_only,
       (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
     FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
   `).bind(passport.passport_id, missionCode).first();
@@ -1033,6 +1483,28 @@ async function claimMission(body, env, cors) {
     }
   }
 
+  let relayVerifierPassportId = null;
+  if (mission.relay_verification_required) {
+    const relayCode = normalizeRelayCode(body.relayCode);
+    const verifier = await env.DB.prepare(`
+      SELECT p.id AS passport_id
+      FROM member_relay_codes mrc
+      JOIN passports p ON p.id = mrc.passport_id
+      JOIN cards c ON c.id = p.card_id
+      WHERE mrc.code_hash = ? AND p.status = 'claimed' AND c.disabled_at IS NULL
+      LIMIT 1
+    `).bind(await sha256(relayCode)).first();
+    if (!verifier || Number(verifier.passport_id) === Number(passport.passport_id)) {
+      throw new HttpError(403, "That Relay Code cannot verify this mission.");
+    }
+    relayVerifierPassportId = Number(verifier.passport_id);
+    const priorVerification = await env.DB.prepare(`
+      SELECT id FROM mission_completions
+      WHERE passport_id = ? AND mission_id = ? AND relay_verifier_passport_id = ? LIMIT 1
+    `).bind(passport.passport_id, mission.id, relayVerifierPassportId).first();
+    if (priorVerification) throw new HttpError(409, "That Relay Code cannot verify this mission again.");
+  }
+
   const completion = await env.DB.prepare(`
     SELECT COUNT(*) AS completion_count, COALESCE(MAX(completion_number), 0) AS last_completion
     FROM mission_completions WHERE passport_id = ? AND mission_id = ?
@@ -1045,15 +1517,18 @@ async function claimMission(body, env, cors) {
   const completionNumber = mission.repeatable ? Number(completion.last_completion) + 1 : 1;
   const keysAwarded = Number(mission.key_reward);
   const statements = [env.DB.prepare(`
-    INSERT INTO mission_completions (id, passport_id, mission_id, completion_number, verified_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(idempotencyKey, passport.passport_id, mission.id, completionNumber, mission.verification_required ? "member-code" : "member-honor")];
+    INSERT INTO mission_completions (id, passport_id, mission_id, completion_number, verified_by, relay_verifier_passport_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(idempotencyKey, passport.passport_id, mission.id, completionNumber,
+    mission.relay_verification_required ? "member-relay" : mission.verification_required ? "member-code" : "member-honor",
+    relayVerifierPassportId)];
   if (keysAwarded > 0) {
     statements.push(env.DB.prepare(`
       INSERT INTO key_transactions
         (id, passport_id, amount, transaction_type, reason_type, reason_id, description, created_by)
       VALUES (?, ?, ?, 'earned', 'mission', ?, ?, ?)
-    `).bind(`key_${idempotencyKey}`, passport.passport_id, keysAwarded, idempotencyKey, `Mission complete: ${mission.title}`, mission.verification_required ? "member-code" : "member-honor"));
+    `).bind(`key_${idempotencyKey}`, passport.passport_id, keysAwarded, idempotencyKey, `Mission complete: ${mission.title}`,
+      mission.relay_verification_required ? "member-relay" : mission.verification_required ? "member-code" : "member-honor"));
   }
   if (mission.assignment_id) {
     statements.push(env.DB.prepare(`
@@ -1070,10 +1545,16 @@ async function claimMission(body, env, cors) {
     throw error;
   }
 
+  await auditSecurityEvent(env, "mission_completed", passport.passport_id, "/api/missions/claim", "completed", { missionId: Number(mission.id), completionNumber });
+
   const refreshed = await getPassportByHash(await sha256(cardId), env);
   return json({
     status: "completed",
-    message: `MISSION COMPLETE // +${keysAwarded} ${keysAwarded === 1 ? "KEY" : "KEYS"}`,
+    message: mission.relay_verification_required
+      ? `CONTACT VERIFIED // MISSION COMPLETE${keysAwarded ? ` // +${keysAwarded} ${keysAwarded === 1 ? "KEY" : "KEYS"}` : ""}`
+      : `MISSION COMPLETE // +${keysAwarded} ${keysAwarded === 1 ? "KEY" : "KEYS"}`,
+    keysAwarded,
+    relayVerified: Boolean(mission.relay_verification_required),
     passport: await buildPublicPassport(refreshed, env)
   }, 201, cors);
 }
@@ -1090,6 +1571,8 @@ async function createMission(body, env, cors) {
   const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
   if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
+  const relayVerificationRequired = body.relayVerificationRequired ? 1 : 0;
+  if (verificationRequired && relayVerificationRequired) throw new HttpError(400, "Choose either Mission Code or Relay Code verification, not both.");
   const socialCheckinOnly = body.socialCheckinOnly ? 1 : 0;
   let verificationCodeHash = null;
   let verificationCodeDisplay = null;
@@ -1103,9 +1586,9 @@ async function createMission(body, env, cors) {
   const sortResult = await env.DB.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS next_order FROM missions`).first();
   const statements = [env.DB.prepare(`
     INSERT INTO missions
-      (code, title, description, key_reward, repeatable, cooldown_hours, active, sort_order, verification_required, verification_code_hash, verification_code_display, counts_as_event, scope, social_checkin_only)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
-  `).bind(code, title, description, keyReward, repeatable, cooldownHours, Number(sortResult.next_order), verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly)];
+      (code, title, description, key_reward, repeatable, cooldown_hours, active, sort_order, verification_required, relay_verification_required, verification_code_hash, verification_code_display, counts_as_event, scope, social_checkin_only)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?)
+  `).bind(code, title, description, keyReward, repeatable, cooldownHours, Number(sortResult.next_order), verificationRequired, relayVerificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly)];
   if (scope === "individual") {
     statements.push(env.DB.prepare(`
       INSERT INTO mission_assignments (id, mission_id, passport_id, assigned_by)
@@ -1114,12 +1597,12 @@ async function createMission(body, env, cors) {
   }
   await env.DB.batch(statements);
 
-  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), cooldownHours, verificationRequired: Boolean(verificationRequired), socialCheckinOnly: Boolean(socialCheckinOnly), scope } }, 201, cors);
+  return json({ status: "created", mission: { code, title, description, keyReward, repeatable: Boolean(repeatable), cooldownHours, verificationRequired: Boolean(verificationRequired), relayVerificationRequired: Boolean(relayVerificationRequired), socialCheckinOnly: Boolean(socialCheckinOnly), scope } }, 201, cors);
 }
 
 async function listAdminMissions(env, cors) {
   const result = await env.DB.prepare(`
-    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.scope, m.social_checkin_only,
+    SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.relay_verification_required, m.scope, m.social_checkin_only,
       m.verification_code_display, m.verification_code_hash IS NOT NULL AS code_configured, m.active,
       COUNT(mc.id) AS completion_count,
       ma.id AS assignment_id, ma.passport_id AS assigned_passport_id, ma.status AS assignment_status,
@@ -1158,6 +1641,8 @@ async function updateMission(body, env, cors) {
   const assignedPassportId = scope === "individual" ? normalizePositiveInteger(body.passportId, "Assigned member") : null;
   if (assignedPassportId && !await getPassportById(assignedPassportId, env)) throw new HttpError(404, "Assigned member not found.");
   const verificationRequired = body.verificationRequired ? 1 : 0;
+  const relayVerificationRequired = body.relayVerificationRequired ? 1 : 0;
+  if (verificationRequired && relayVerificationRequired) throw new HttpError(400, "Choose either Mission Code or Relay Code verification, not both.");
   const socialCheckinOnly = body.socialCheckinOnly ? 1 : 0;
   let verificationCodeHash = existing.verification_code_hash;
   let verificationCodeDisplay = existing.verification_code_display;
@@ -1170,9 +1655,9 @@ async function updateMission(body, env, cors) {
 
   const statements = [env.DB.prepare(`
     UPDATE missions SET title = ?, description = ?, key_reward = ?, repeatable = ?, cooldown_hours = ?,
-      verification_required = ?, verification_code_hash = ?, verification_code_display = ?, scope = ?, social_checkin_only = ?, updated_at = CURRENT_TIMESTAMP
+      verification_required = ?, relay_verification_required = ?, verification_code_hash = ?, verification_code_display = ?, scope = ?, social_checkin_only = ?, updated_at = CURRENT_TIMESTAMP
     WHERE code = ?
-  `).bind(title, description, keyReward, repeatable, cooldownHours, verificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly, code)];
+  `).bind(title, description, keyReward, repeatable, cooldownHours, verificationRequired, relayVerificationRequired, verificationCodeHash, verificationCodeDisplay, scope, socialCheckinOnly, code)];
   const activeAssignment = await env.DB.prepare(`
     SELECT ma.id, ma.passport_id FROM mission_assignments ma WHERE ma.mission_id = ? AND ma.status = 'active' LIMIT 1
   `).bind(existing.id).first();
@@ -1323,6 +1808,7 @@ async function assignNfcCard(body, env, cors) {
       ON CONFLICT(uid) DO UPDATE SET active = 1, removed_at = NULL
     `).bind(passportId, uid)
   ]);
+  await auditSecurityEvent(env, "nfc_card_assigned", passportId, "/api/admin/nfc/assign", "completed");
   return json({ status: "assigned", passportId, memberName: passport.member_name || null, cardNumber: passport.card_number, uid }, 200, cors);
 }
 
@@ -1543,6 +2029,7 @@ function toAdminMission(mission) {
     keyReward: Number(mission.key_reward), repeatable: Boolean(mission.repeatable),
     cooldownHours: Number(mission.cooldown_hours || 0),
     verificationRequired: Boolean(mission.verification_required), verificationCode: mission.verification_code_display || "",
+    relayVerificationRequired: Boolean(mission.relay_verification_required),
     socialCheckinOnly: Boolean(mission.social_checkin_only),
     codeConfigured: Boolean(mission.code_configured), active: Boolean(mission.active),
     completionCount: Number(mission.completion_count), scope: mission.scope || "global",
@@ -1926,11 +2413,12 @@ async function setInstructorRole(body, env, cors) {
   } else {
     await env.DB.prepare(`DELETE FROM passport_roles WHERE passport_id = ? AND role = 'instructor'`).bind(passport.passport_id).run();
   }
+  await auditSecurityEvent(env, enabled ? "instructor_role_granted" : "instructor_role_revoked", passport.passport_id, "/api/admin/instructors/set", "completed");
   return await listInstructors(env, cors);
 }
 
 async function listMembershipRequests(env, cors) {
-  const [nominations, invitations] = await Promise.all([
+  const [nominations, invitations, nominationAccess] = await Promise.all([
     env.DB.prepare(`
       SELECT n.id, n.nominee_description, n.reason, n.status, n.submitted_at, n.updated_at,
         p.member_name AS nominator_name, c.card_number AS nominator_card,
@@ -1945,9 +2433,31 @@ async function listMembershipRequests(env, cors) {
       FROM membership_invitations i JOIN passports p ON p.id = i.inviter_passport_id JOIN cards c ON c.id = p.card_id
       LEFT JOIN cards assigned ON assigned.id = i.assigned_card_id
       ORDER BY i.requested_at DESC
+    `).all(),
+    env.DB.prepare(`
+      SELECT p.id AS passport_id, p.member_name, c.card_number,
+        EXISTS(SELECT 1 FROM member_capabilities mc WHERE mc.passport_id = p.id AND mc.capability = 'membership_nomination') AS access_granted,
+        EXISTS(SELECT 1 FROM membership_nominations n WHERE n.nominator_passport_id = p.id) AS nomination_used
+      FROM passports p JOIN cards c ON c.id = p.card_id
+      WHERE p.status = 'claimed' AND c.disabled_at IS NULL
+      ORDER BY CAST(c.card_number AS INTEGER), c.card_number
     `).all()
   ]);
-  return json({ nominations: nominations.results || [], invitations: invitations.results || [] }, 200, cors);
+  return json({ nominations: nominations.results || [], invitations: invitations.results || [], nominationAccess: nominationAccess.results || [] }, 200, cors);
+}
+
+async function grantNominationAccess(body, env, cors) {
+  const passport = await getPassportById(body.passportId, env);
+  if (!passport) throw new HttpError(404, "Member not found.");
+  const used = await env.DB.prepare(`SELECT 1 AS submitted FROM membership_nominations WHERE nominator_passport_id = ? LIMIT 1`).bind(passport.passport_id).first();
+  if (used) throw new HttpError(409, "This member has already used their nomination.");
+  await env.DB.prepare(`
+    INSERT INTO member_capabilities (passport_id, capability, unlock_source)
+    VALUES (?, 'membership_nomination', 'admin_grant')
+    ON CONFLICT(passport_id, capability) DO UPDATE SET unlock_source = 'admin_grant'
+  `).bind(passport.passport_id).run();
+  await auditSecurityEvent(env, "nomination_access_granted", passport.passport_id, "/api/admin/membership/grant-nomination", "completed");
+  return await listMembershipRequests(env, cors);
 }
 
 async function listAvailableInvitationCards(env, cors) {
@@ -1995,7 +2505,11 @@ async function requireAdmin(request, env) {
   if (!env.INNER_CIRCLE_ADMIN_TOKEN) throw new Error("INNER_CIRCLE_ADMIN_TOKEN is not configured.");
   const authorization = request.headers.get("Authorization") || "";
   const suppliedToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!constantTimeEqual(suppliedToken, env.INNER_CIRCLE_ADMIN_TOKEN)) throw new HttpError(401, "Administrator access required.");
+  if (!constantTimeEqual(suppliedToken, env.INNER_CIRCLE_ADMIN_TOKEN)) {
+    await enforceRateLimit(request, env, "admin-auth-failure", 10, 15 * 60 * 1000);
+    await auditSecurityEvent(env, "admin_auth_failed", null, new URL(request.url).pathname, "denied");
+    throw new HttpError(401, "Administrator access required.");
+  }
 }
 
 function constantTimeEqual(left, right) {
@@ -2007,16 +2521,43 @@ function constantTimeEqual(left, right) {
   return difference === 0;
 }
 
-async function enforceRateLimit(request, env) {
+async function enforceRateLimit(request, env, explicitScope = null, explicitLimit = null, explicitWindowMs = null) {
   if (!env.RATE_LIMIT_SECRET) throw new Error("RATE_LIMIT_SECRET is not configured.");
   const ipAddress = request.headers.get("CF-Connecting-IP") || "local";
-  const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
-  const rateKey = await sha256(`${env.RATE_LIMIT_SECRET}:${ipAddress}:${windowStart}`);
+  const path = new URL(request.url).pathname;
+  const policy = getRateLimitPolicy(path);
+  const scope = explicitScope || policy.scope;
+  const limit = explicitLimit || policy.limit;
+  const windowMs = explicitWindowMs || policy.windowMs;
+  const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+  const rateKey = await sha256(`${env.RATE_LIMIT_SECRET}:${ipAddress}:${scope}:${windowStart}`);
   const result = await env.DB.prepare(`
     INSERT INTO rate_limits (rate_key, window_start, attempts) VALUES (?, ?, 1)
     ON CONFLICT(rate_key) DO UPDATE SET attempts = attempts + 1 RETURNING attempts
   `).bind(rateKey, windowStart).first();
-  if (Number(result.attempts) > RATE_LIMIT_ATTEMPTS) throw new HttpError(429, "Too many attempts. Please wait and try again.");
+  if (Number(result.attempts) > limit) {
+    await auditSecurityEvent(env, "rate_limit_exceeded", null, path, "denied", { scope });
+    throw new HttpError(429, "Too many attempts. Please wait and try again.");
+  }
+}
+
+function getRateLimitPolicy(path) {
+  if (path === "/api/card/pin/unlock") return { scope: "pin-unlock", limit: 20, windowMs: 10 * 60 * 1000 };
+  if (["/api/card/lookup", "/api/card/claim", "/api/card/pin/setup", "/api/card/pin/reset-request"].includes(path)) return { scope: "card-access", limit: 40, windowMs: 10 * 60 * 1000 };
+  if (["/api/missions/claim", "/api/events/check-in", "/api/milestones/claim", "/api/workshop/complete", "/api/signals/recipient"].includes(path)) return { scope: `code:${path}`, limit: 35, windowMs: 10 * 60 * 1000 };
+  if (path.startsWith("/api/classifieds/")) return { scope: "classifieds", limit: 80, windowMs: 10 * 60 * 1000 };
+  return { scope: "member-actions", limit: 150, windowMs: RATE_LIMIT_WINDOW_MS };
+}
+
+async function auditSecurityEvent(env, eventType, actorPassportId, route, outcome, metadata = null) {
+  try {
+    await env.DB.prepare(`
+      INSERT INTO security_audit_log (id, event_type, actor_passport_id, route, outcome, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(`audit_${crypto.randomUUID()}`, eventType, actorPassportId || null, route || null, outcome, metadata ? JSON.stringify(metadata) : null).run();
+  } catch (error) {
+    console.error("Security audit log write failed", error);
+  }
 }
 
 function normalizeCardId(value) {
@@ -2153,7 +2694,16 @@ function parseJsonArray(value) {
 
 async function readJson(request) {
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) throw new HttpError(415, "Expected a JSON request.");
-  try { return await request.json(); } catch { throw new HttpError(400, "Invalid request."); }
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (contentLength > 32 * 1024) throw new HttpError(413, "Request is too large.");
+  try {
+    const text = await request.text();
+    if (new TextEncoder().encode(text).length > 32 * 1024) throw new HttpError(413, "Request is too large.");
+    return JSON.parse(text);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, "Invalid request.");
+  }
 }
 
 async function sha256(value) {
@@ -2186,7 +2736,10 @@ function getCorsHeaders(request, env) {
   const headers = {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Cache-Control": "no-store",
-    "Content-Security-Policy": "default-src 'none'", "X-Content-Type-Options": "nosniff"
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains"
   };
   if (origin) headers["Access-Control-Allow-Origin"] = origin;
   return headers;
