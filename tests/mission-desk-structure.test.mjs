@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "node:test";
+import nodeTest from "node:test";
+import { existsSync } from "node:fs";
 
 const root = new URL("../", import.meta.url);
-const html = await readFile(new URL("admin-local/index.html", root), "utf8");
-const script = await readFile(new URL("admin-local/admin.js", root), "utf8");
+const privateDeskAvailable = existsSync(new URL("admin-local/index.html", root)) && existsSync(new URL("admin-local/admin.js", root));
+const test = (name, callback) => nodeTest(name, { skip: privateDeskAvailable ? false : "Private Mission Desk is intentionally excluded from the public repository." }, callback);
+const html = privateDeskAvailable ? await readFile(new URL("admin-local/index.html", root), "utf8") : "";
+const script = privateDeskAvailable ? await readFile(new URL("admin-local/admin.js", root), "utf8") : "";
 
 function ids(source) {
   return [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);

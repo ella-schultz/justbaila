@@ -4,7 +4,8 @@ const cardId = new URLSearchParams(window.location.search).get("id")?.trim().toU
 const accessTokenKey = `justbaila-card-session:v1:${cardId}`;
 const redButtonPressedKey = `justbaila-red-button:v1:${cardId}`;
 const secretKeyUsedKey = `justbaila-secret-key:v3:${cardId}`;
-let accessToken = window.localStorage.getItem(accessTokenKey) || "";
+let accessToken = "";
+try { accessToken = window.localStorage.getItem(accessTokenKey) || ""; } catch {}
 let currentUndergroundLevel = null;
 let currentTechniqueLab = null;
 let currentMemberName = "";
@@ -424,6 +425,7 @@ async function claimPassport(event) {
     });
     const result = await response.json();
     if ((response.ok || response.status === 409) && result.status === "pin_setup") { showState("pinSetup", "Secure your access"); return; }
+    if (response.status === 409 && result.status === "pin_required") { showState("pin", "Access protected"); return; }
     if (response.status === 404 || result.status === "invalid") {
       showState("invalid", "Card not recognized");
       return;
@@ -488,9 +490,10 @@ async function submitPinRequest(path, pin, message, form) {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cardId, pin }) });
     const result = await response.json();
+    if (response.status === 409 && result.status === "pin_setup") { showState("pinSetup", "Secure your access"); return; }
     if (!response.ok || !result.accessToken || !result.passport) throw new Error(result.error || "Access could not be unlocked.");
     accessToken = result.accessToken;
-    window.localStorage.setItem(accessTokenKey, accessToken);
+    try { window.localStorage.setItem(accessTokenKey, accessToken); } catch {}
     form.reset();
     await transitionToPassport(result.passport);
   } catch (error) { message.textContent = error.message; }
@@ -2165,7 +2168,8 @@ function formatDate(value) {
 }
 
 function formatDateTime(value) {
-  const date = new Date(value);
+  const text = String(value || "");
+  const date = new Date(/^\d{4}-\d{2}-\d{2} /.test(text) ? `${text.replace(" ", "T")}Z` : text);
   if (Number.isNaN(date.getTime())) return "soon";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",

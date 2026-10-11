@@ -82,7 +82,7 @@ test("event attendance is unique and corrections remove it from effective counts
 });
 
 test("PIN lockout and expiring hashed sessions remain implemented", () => {
-  assert.match(workerSource, /pin_failed_attempts = \?/);
+  assert.match(workerSource, /pin_failed_attempts = CASE WHEN pin_failed_attempts \+ 1 >= 5/);
   assert.match(workerSource, /datetime\('now', '\+15 minutes'\)/);
   assert.match(workerSource, /card_access_sessions[\s\S]{0,200}token_hash = \?[\s\S]{0,100}expires_at > CURRENT_TIMESTAMP/);
   assert.match(workerSource, /datetime\('now', '\+24 hours'\)/);

@@ -312,8 +312,9 @@ async function setupCardPin(body, env, cors) {
   if (passport.pin_hash) throw new HttpError(409, "This card already has a PIN.");
   const salt = makeRandomToken(16);
   const pinHash = await hashPin(pin, salt);
-  await env.DB.prepare(`UPDATE passports SET pin_hash = ?, pin_salt = ?, pin_failed_attempts = 0, pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND pin_hash IS NULL`)
-    .bind(pinHash, salt, passport.passport_id).run();
+  const saved = await env.DB.prepare(`UPDATE passports SET pin_hash = ?, pin_salt = ?, pin_failed_attempts = 0, pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND pin_hash IS NULL AND status = 'claimed' RETURNING id`)
+    .bind(pinHash, salt, passport.passport_id).first();
+  if (!saved) throw new HttpError(409, "This card already has a PIN or is no longer available. Try unlocking it again.");
   const accessToken = await createPinSession(passport.passport_id, env);
   const refreshed = await getPassportByHash(await sha256(cardId), env);
   return json({ status: "claimed", accessToken, passport: await buildPublicPassport(refreshed, env) }, 201, cors);
@@ -324,20 +325,32 @@ async function unlockCardPin(body, env, cors) {
   const pin = normalizePin(body.pin);
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
+  if (passport.status !== "claimed") throw new HttpError(403, "This access card is not available.");
   if (!passport.pin_hash) return json({ status: "pin_setup", cardNumber: passport.card_number }, 409, cors);
   if (passport.pin_locked_until && new Date(`${passport.pin_locked_until.replace(" ", "T")}Z`).getTime() > Date.now()) {
     throw new HttpError(429, "Too many incorrect attempts. Try again in 15 minutes.");
   }
   const valid = constantTimeEqual(await hashPin(pin, passport.pin_salt), passport.pin_hash);
   if (!valid) {
-    const failedAttempts = Number(passport.pin_failed_attempts || 0) + 1;
-    const lock = failedAttempts >= 5;
-    await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = ?, pin_locked_until = CASE WHEN ? THEN datetime('now', '+15 minutes') ELSE NULL END WHERE id = ?`)
-      .bind(lock ? 0 : failedAttempts, lock ? 1 : 0, passport.passport_id).run();
+    const failure = await env.DB.prepare(`
+      UPDATE passports SET
+        pin_failed_attempts = CASE WHEN pin_failed_attempts + 1 >= 5 THEN 0 ELSE pin_failed_attempts + 1 END,
+        pin_locked_until = CASE
+          WHEN pin_locked_until > CURRENT_TIMESTAMP THEN pin_locked_until
+          WHEN pin_failed_attempts + 1 >= 5 THEN datetime('now', '+15 minutes') ELSE NULL END
+      WHERE id = ? AND pin_hash = ? AND status = 'claimed'
+      RETURNING pin_failed_attempts, pin_locked_until
+    `).bind(passport.passport_id, passport.pin_hash).first();
+    const failedAttempts = Number(failure?.pin_failed_attempts || 0);
+    const lock = Boolean(failure?.pin_locked_until);
     await auditSecurityEvent(env, "pin_unlock_failed", passport.passport_id, "/api/card/pin/unlock", lock ? "locked" : "denied", { failedAttempts });
     throw new HttpError(lock ? 429 : 403, lock ? "Too many incorrect attempts. Try again in 15 minutes." : "That PIN is not correct.");
   }
-  await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = 0, pin_locked_until = NULL WHERE id = ?`).bind(passport.passport_id).run();
+  const unlocked = await env.DB.prepare(`UPDATE passports SET pin_failed_attempts = 0, pin_locked_until = NULL
+    WHERE id = ? AND pin_hash = ? AND status = 'claimed'
+      AND (pin_locked_until IS NULL OR pin_locked_until <= CURRENT_TIMESTAMP)
+    RETURNING id`).bind(passport.passport_id, passport.pin_hash).first();
+  if (!unlocked) throw new HttpError(403, "This card is locked or its access has changed. Please try again later.");
   const accessToken = await createPinSession(passport.passport_id, env);
   await auditSecurityEvent(env, "pin_unlock_succeeded", passport.passport_id, "/api/card/pin/unlock", "allowed");
   return json({ status: "claimed", accessToken, passport: await buildPublicPassport(passport, env) }, 200, cors);
@@ -370,7 +383,7 @@ async function hasValidPinSession(passportId, accessToken, env) {
 
 async function requirePinSession(body, env, allowLegalPending = false) {
   const passport = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
-  if (!passport || passport.disabled_at || !await hasValidPinSession(passport.passport_id, body.accessToken, env)) throw new HttpError(401, "Enter your card PIN again.");
+  if (!passport || passport.disabled_at || passport.status !== "claimed" || !await hasValidPinSession(passport.passport_id, body.accessToken, env)) throw new HttpError(401, "Enter your card PIN again.");
   if (!allowLegalPending && (!passport.adult_confirmed_at || !passport.terms_accepted_at || !passport.privacy_acknowledged_at || passport.legal_version !== LEGAL_VERSION)) {
     throw new HttpError(403, "Review and accept the current adult-use Terms and Privacy Policy to continue.");
   }
@@ -1778,10 +1791,13 @@ async function claimMission(body, env, cors) {
 
   const mission = await env.DB.prepare(`
     SELECT m.id, m.code, m.title, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.relay_verification_required, m.verification_code_hash, m.scope, m.social_checkin_only,
+      m.visibility_mode, m.trigger_type, m.trigger_value, m.operator_active,
+      (SELECT ma.status FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status = 'active' LIMIT 1) AS assignment_status,
       (SELECT ma.id FROM mission_assignments ma WHERE ma.mission_id = m.id AND ma.passport_id = ? AND ma.status IN ('active', 'completed') ORDER BY ma.assigned_at DESC LIMIT 1) AS assignment_id
     FROM missions m WHERE m.code = ? AND m.active = 1 LIMIT 1
-  `).bind(passport.passport_id, missionCode).first();
+  `).bind(passport.passport_id, passport.passport_id, missionCode).first();
   if (!mission) throw new HttpError(404, "Mission not found.");
+  if (mission.visibility_mode === "ghost" && !await isGhostMissionEligible(mission, passport, env)) throw new HttpError(404, "Mission not found.");
   if (mission.scope === "individual" && !mission.assignment_id) throw new HttpError(404, "That private assignment is not available to this member.");
   if (mission.social_checkin_only) {
     const settings = await env.DB.prepare(`SELECT social_checkin_visible FROM invitation_settings WHERE id = 1`).first();
@@ -2897,9 +2913,27 @@ async function enforceRateLimit(request, env, explicitScope = null, explicitLimi
   const ipAddress = request.headers.get("CF-Connecting-IP") || "local";
   const path = new URL(request.url).pathname;
   const policy = getRateLimitPolicy(path);
-  const scope = explicitScope || policy.scope;
-  const limit = explicitLimit || policy.limit;
+  let scope = explicitScope || policy.scope;
+  let limit = explicitLimit || policy.limit;
   const windowMs = explicitWindowMs || policy.windowMs;
+  if (!explicitScope) {
+    await enforceRateLimit(request, env, "traffic", 1200, RATE_LIMIT_WINDOW_MS);
+    const body = await readJson(request.clone());
+    const cardId = String(body?.cardId || "").trim().toUpperCase();
+    if (CARD_ID_PATTERN.test(cardId)) {
+      const passport = await getPassportByHash(await sha256(cardId), env);
+      if (passport && !passport.disabled_at && passport.status !== "suspended") {
+        const authenticated = passport.status === "claimed" && await hasValidPinSession(passport.passport_id, body.accessToken, env);
+        if (path.startsWith("/api/card/") || authenticated) {
+          scope += `:card:${passport.passport_id}`;
+          if (path === "/api/card/lookup" && authenticated) {
+            scope = `member-refresh:${passport.passport_id}`;
+            limit = 150;
+          }
+        }
+      }
+    }
+  }
   const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
   if (crypto.getRandomValues(new Uint8Array(1))[0] < 8) {
     await env.DB.prepare(`DELETE FROM rate_limits WHERE window_start < ?`).bind(Date.now() - 24 * 60 * 60 * 1000).run();
@@ -3131,15 +3165,17 @@ async function respondTargetSuggestion(body, passport, env, cors) {
 
 async function respondOverlap(body, passport, env, cors) {
   const status = body.action === "accept" ? "accepted" : "declined";
-  const result = await env.DB.prepare(`UPDATE overlap_invitations SET status = ? WHERE id = ? AND status = 'active' AND (first_passport_id = ? OR second_passport_id = ?) RETURNING id`).bind(status, String(body.overlapId || ""), passport.passport_id, passport.passport_id).first();
+  const result = await env.DB.prepare(`UPDATE overlap_invitations SET status = ? WHERE id = ? AND status = 'active'
+    AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+    AND (first_passport_id = ? OR second_passport_id = ?) RETURNING id`).bind(status, String(body.overlapId || ""), passport.passport_id, passport.passport_id).first();
   if (!result) throw new HttpError(404, "That Overlap is no longer active.");
   return json({ status }, 200, cors);
 }
 
 async function buildMemberCommandLayer(passport, env) {
   const [transmissions, drops, overlaps] = await Promise.all([
-    env.DB.prepare(`SELECT mt.id, mt.message_type, mt.message, mt.expires_at FROM manual_transmissions mt JOIN manual_transmission_recipients mr ON mr.transmission_id = mt.id WHERE mr.passport_id = ? AND mr.dismissed_at IS NULL AND mt.expires_at > CURRENT_TIMESTAMP ORDER BY mt.created_at DESC`).bind(passport.passport_id).all(),
-    env.DB.prepare(`SELECT dd.id, dd.title, dd.body, dd.action_type, dd.action_value, dd.expires_at FROM dead_drops dd WHERE dd.active = 1 AND dd.starts_at <= CURRENT_TIMESTAMP AND dd.expires_at > CURRENT_TIMESTAMP
+    env.DB.prepare(`SELECT mt.id, mt.message_type, mt.message, mt.expires_at FROM manual_transmissions mt JOIN manual_transmission_recipients mr ON mr.transmission_id = mt.id WHERE mr.passport_id = ? AND mr.dismissed_at IS NULL AND datetime(mt.expires_at) > CURRENT_TIMESTAMP ORDER BY mt.created_at DESC`).bind(passport.passport_id).all(),
+    env.DB.prepare(`SELECT dd.id, dd.title, dd.body, dd.action_type, dd.action_value, dd.expires_at FROM dead_drops dd WHERE dd.active = 1 AND datetime(dd.starts_at) <= CURRENT_TIMESTAMP AND datetime(dd.expires_at) > CURRENT_TIMESTAMP
       AND NOT EXISTS (SELECT 1 FROM dead_drop_claims claim WHERE claim.dead_drop_id = dd.id AND claim.passport_id = ?)
       AND (dd.max_claims IS NULL OR dd.max_claims > (SELECT COUNT(*) FROM dead_drop_claims count_claim WHERE count_claim.dead_drop_id = dd.id))
       AND (dd.eligibility_type = 'all' OR (dd.eligibility_type = 'member' AND dd.eligibility_value = CAST(? AS TEXT)) OR (dd.eligibility_type = 'level' AND dd.eligibility_value = ?)
@@ -3149,7 +3185,7 @@ async function buildMemberCommandLayer(passport, env) {
       FROM overlap_invitations oi JOIN technique_competencies first_skill ON first_skill.id = oi.first_skill_id JOIN technique_competencies second_skill ON second_skill.id = oi.second_skill_id
       JOIN passports first_member ON first_member.id = oi.first_passport_id JOIN cards first_card ON first_card.id = first_member.card_id
       JOIN passports second_member ON second_member.id = oi.second_passport_id JOIN cards second_card ON second_card.id = second_member.card_id
-      WHERE (oi.first_passport_id = ? OR oi.second_passport_id = ?) AND oi.status = 'active' AND (oi.expires_at IS NULL OR oi.expires_at > CURRENT_TIMESTAMP)`).bind(passport.passport_id, passport.passport_id, passport.passport_id).all()
+      WHERE (oi.first_passport_id = ? OR oi.second_passport_id = ?) AND oi.status = 'active' AND (oi.expires_at IS NULL OR datetime(oi.expires_at) > CURRENT_TIMESTAMP)`).bind(passport.passport_id, passport.passport_id, passport.passport_id).all()
   ]);
   return { transmissions: transmissions.results || [], deadDrops: drops.results || [], overlaps: (overlaps.results || []).map((item) => ({ id: item.id, partnerCard: item.partner_card, firstSkill: item.first_skill, secondSkill: item.second_skill, status: item.status, expiresAt: item.expires_at })) };
 }
@@ -3161,12 +3197,17 @@ async function dismissTransmission(body, passport, env, cors) {
 
 async function claimDeadDrop(body, passport, env, cors) {
   const id = String(body.deadDropId || "");
-  const drop = await env.DB.prepare(`SELECT * FROM dead_drops WHERE id = ? AND active = 1 AND starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP`).bind(id).first();
+  const drop = await env.DB.prepare(`SELECT * FROM dead_drops WHERE id = ? AND active = 1 AND datetime(starts_at) <= CURRENT_TIMESTAMP AND datetime(expires_at) > CURRENT_TIMESTAMP`).bind(id).first();
   if (!drop) throw new HttpError(404, "This Dead Drop is no longer active.");
   const eligible = drop.eligibility_type === "all" || (drop.eligibility_type === "member" && String(drop.eligibility_value) === String(passport.passport_id)) || (drop.eligibility_type === "level" && drop.eligibility_value === getUndergroundLevel(Number(passport.mission_count || 0))) || (drop.eligibility_type === "event" && await env.DB.prepare(`SELECT 1 ok FROM event_attendance WHERE passport_id = ? AND event_id = ?`).bind(passport.passport_id, Number(drop.eligibility_value)).first());
   if (!eligible) throw new HttpError(403, "This Dead Drop is not available.");
   if (drop.max_claims != null) { const count = await env.DB.prepare(`SELECT COUNT(*) count FROM dead_drop_claims WHERE dead_drop_id = ?`).bind(id).first(); if (Number(count?.count || 0) >= Number(drop.max_claims)) throw new HttpError(409, "This Dead Drop is empty."); }
-  await env.DB.prepare(`INSERT OR IGNORE INTO dead_drop_claims (dead_drop_id, passport_id) VALUES (?, ?)`).bind(id, passport.passport_id).run();
+  const claimed = await env.DB.prepare(`INSERT OR IGNORE INTO dead_drop_claims (dead_drop_id, passport_id)
+    SELECT id, ? FROM dead_drops WHERE id = ? AND active = 1
+      AND datetime(starts_at) <= CURRENT_TIMESTAMP AND datetime(expires_at) > CURRENT_TIMESTAMP
+      AND (max_claims IS NULL OR (SELECT COUNT(*) FROM dead_drop_claims WHERE dead_drop_id = dead_drops.id) < max_claims)
+    RETURNING dead_drop_id`).bind(passport.passport_id, id).first();
+  if (!claimed) throw new HttpError(409, "This Dead Drop has already been claimed or is no longer available.");
   return json({ status: "claimed", actionType: drop.action_type, actionValue: drop.action_value || null }, 200, cors);
 }
 
@@ -3181,7 +3222,7 @@ async function listTargetMembers(body, env, cors) {
   if (!skill) throw new HttpError(404, "Target not found.");
   const members = await env.DB.prepare(`SELECT p.id passport_id, p.member_name, c.card_number, mt.status, mt.added_at
     FROM member_targets mt JOIN passports p ON p.id = mt.passport_id JOIN cards c ON c.id = p.card_id
-    WHERE mt.skill_id = ? AND mt.active = 1 AND p.status = 'active'
+    WHERE mt.skill_id = ? AND mt.active = 1 AND p.status = 'claimed' AND c.disabled_at IS NULL
     ORDER BY p.member_name COLLATE NOCASE, c.card_number`).bind(skill.id).all();
   return json({ skill: { id: Number(skill.id), code: skill.code, name: skill.name }, members: members.results || [] }, 200, cors);
 }
@@ -3225,6 +3266,8 @@ async function buildOverlapRadar(body, env, cors) {
     JOIN event_attendance eb ON eb.passport_id = b.passport_id AND eb.event_id = ?
     JOIN passports pa ON pa.id = a.passport_id JOIN cards ca ON ca.id = pa.card_id JOIN passports pb ON pb.id = b.passport_id JOIN cards cb ON cb.id = pb.card_id
     WHERE a.active = 1 AND (a.skill_id = b.skill_id OR EXISTS (SELECT 1 FROM technique_complementarity tc WHERE tc.skill_id = a.skill_id AND tc.complementary_skill_id = b.skill_id))
+      AND pa.status = 'claimed' AND pb.status = 'claimed' AND ca.disabled_at IS NULL AND cb.disabled_at IS NULL
+      AND EXISTS (SELECT 1 FROM events current_event WHERE current_event.id = ea.event_id AND current_event.active = 1)
       AND (sa.role_applicability = 'either' OR sb.role_applicability = 'either' OR sa.role_applicability != sb.role_applicability)
       AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND (ac.target_id = CAST(ea.id AS TEXT) OR ac.target_id = CAST(eb.id AS TEXT)) AND ac.affects_effective_state = 1)
     ORDER BY ca.card_number, cb.card_number, sa.sort_order`).bind(eventId, eventId).all();
@@ -3234,9 +3277,13 @@ async function buildOverlapRadar(body, env, cors) {
 async function activateOverlap(body, env, cors) {
   const firstPassportId = Number(body.firstPassportId), secondPassportId = Number(body.secondPassportId), firstSkillId = Number(body.firstSkillId), secondSkillId = Number(body.secondSkillId);
   if (![firstPassportId, secondPassportId, firstSkillId, secondSkillId].every(Number.isInteger) || firstPassportId === secondPassportId) throw new HttpError(400, "Choose two valid members and Targets.");
-  const eligibility = await env.DB.prepare(`SELECT COUNT(*) count FROM member_targets WHERE active = 1 AND ((passport_id = ? AND skill_id = ?) OR (passport_id = ? AND skill_id = ?))`).bind(firstPassportId, firstSkillId, secondPassportId, secondSkillId).first();
+  const eligibility = await env.DB.prepare(`SELECT COUNT(*) count FROM member_targets mt
+    JOIN passports p ON p.id = mt.passport_id JOIN cards c ON c.id = p.card_id
+    JOIN technique_competencies tc ON tc.id = mt.skill_id
+    WHERE mt.active = 1 AND p.status = 'claimed' AND c.disabled_at IS NULL AND tc.active = 1 AND tc.overlap_eligible = 1
+      AND ((mt.passport_id = ? AND mt.skill_id = ?) OR (mt.passport_id = ? AND mt.skill_id = ?))`).bind(firstPassportId, firstSkillId, secondPassportId, secondSkillId).first();
   if (Number(eligibility?.count || 0) !== 2) throw new HttpError(409, "Both members must still have these active Targets.");
-  const existing = await env.DB.prepare(`SELECT id FROM overlap_invitations WHERE status = 'active' AND expires_at > CURRENT_TIMESTAMP AND ((first_passport_id = ? AND second_passport_id = ?) OR (first_passport_id = ? AND second_passport_id = ?)) AND first_skill_id = ? AND second_skill_id = ? LIMIT 1`).bind(firstPassportId, secondPassportId, secondPassportId, firstPassportId, firstSkillId, secondSkillId).first();
+  const existing = await env.DB.prepare(`SELECT id FROM overlap_invitations WHERE status = 'active' AND datetime(expires_at) > CURRENT_TIMESTAMP AND ((first_passport_id = ? AND second_passport_id = ?) OR (first_passport_id = ? AND second_passport_id = ?)) AND first_skill_id = ? AND second_skill_id = ? LIMIT 1`).bind(firstPassportId, secondPassportId, secondPassportId, firstPassportId, firstSkillId, secondSkillId).first();
   if (existing) throw new HttpError(409, "That Overlap is already active.");
   const eventId = Number.isInteger(Number(body.eventId)) && Number(body.eventId) > 0 ? Number(body.eventId) : null;
   const id = `overlap_${crypto.randomUUID()}`; const expiresAt = new Date(Date.now() + (eventId ? 4 : 24) * 60 * 60 * 1000).toISOString();
