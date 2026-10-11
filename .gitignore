@@ -1,0 +1,46 @@
+# Dependencies and local Cloudflare state
+node_modules/
+.wrangler/
+
+# Environment files and credentials
+.dev.vars
+.dev.vars.*
+worker/.dev.vars
+worker/.dev.vars.*
+.env
+.env.*
+worker/.env
+worker/.env.*
+worker/CLOUDFLARE_CREDENTIALS_PRIVATE.txt
+worker/INNER_CIRCLE_ADMIN_TOKEN_PRIVATE.txt
+
+# Private NFC inventory and organizer tools
+exports/
+worker/seeds/
+admin-local/
+
+# Private operating notes
+INNER_CIRCLE_SETUP.md
+Notes.rtf
+
+# Superseded ungated Inner Circle prototype
+velvet-floor-9c4e7a.html
+
+# Local databases, logs, and temporary files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+*.tmp
+*.bak
+*~
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Local upload staging folders
+Upload/
+Do Not Upload/

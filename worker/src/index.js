@@ -2,6 +2,21 @@ const CARD_ID_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
 const RELAY_CODE_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const LEGAL_VERSION = "2026-09-28";
+const MEMBER_PULSE_THRESHOLDS = Object.freeze({ newDays: 14, activeDays: 7, dormantDays: 45, movingHours: 48 });
+const ADMIN_READ_ROUTES = new Set([
+  "/api/admin/passports/search", "/api/admin/activity", "/api/admin/passports/details",
+  "/api/admin/missions/list", "/api/admin/events/list", "/api/admin/nfc/member",
+  "/api/admin/social-checkin/get", "/api/admin/signals/visibility/get", "/api/admin/schedule/list",
+  "/api/admin/milestones/codes", "/api/admin/milestones/list", "/api/admin/rewards/list",
+  "/api/admin/archive/list", "/api/admin/workshop/list", "/api/admin/classifieds/moderation",
+  "/api/admin/rewards/redemptions", "/api/admin/invitation/get", "/api/admin/signals/list",
+  "/api/admin/signals/details", "/api/admin/technique/member", "/api/admin/technique/requests",
+  "/api/admin/technique/settings/get", "/api/admin/instructors/list", "/api/admin/membership/list",
+  "/api/admin/membership/available-cards", "/api/admin/corrections/list", "/api/admin/command-center",
+  "/api/admin/technique/catalog", "/api/admin/technique/overlap-radar", "/api/admin/member/operations"
+  , "/api/admin/technique/target-members"
+]);
 
 export default {
   async fetch(request, env) {
@@ -22,8 +37,8 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/api/card/claim") {
         await enforceRateLimit(request, env);
-        const { cardId, memberName } = await readJson(request);
-        return await claimCard(cardId, memberName, env, cors);
+        const { cardId, memberName, adultConfirmed, termsAccepted, privacyAcknowledged } = await readJson(request);
+        return await claimCard(cardId, memberName, adultConfirmed, termsAccepted, privacyAcknowledged, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/card/pin/setup") {
         await enforceRateLimit(request, env);
@@ -42,6 +57,12 @@ export default {
         const body = await readJson(request);
         const passport = await requirePinSession(body, env);
         return await markMemberIntroSeen(passport, env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/member/legal/accept") {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const passport = await requirePinSession(body, env, true);
+        return await acceptMemberLegalTerms(body, passport, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/workshop/complete") {
         await enforceRateLimit(request, env);
@@ -76,6 +97,23 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/technique/request") {
         await enforceRateLimit(request, env);
         const body = await readJson(request); await requirePinSession(body, env); return await requestTechniqueCheck(body, env, cors);
+      }
+      if (request.method === "POST" && url.pathname.startsWith("/api/technique/targets/")) {
+        await enforceRateLimit(request, env);
+        const body = await readJson(request);
+        const passport = await requirePinSession(body, env);
+        if (url.pathname === "/api/technique/targets/update") return await updateMemberTarget(body, passport, env, cors);
+        if (url.pathname === "/api/technique/targets/preference") return await updateOverlapPreference(body, passport, env, cors);
+        if (url.pathname === "/api/technique/targets/suggestion") return await respondTargetSuggestion(body, passport, env, cors);
+        if (url.pathname === "/api/technique/targets/overlap") return await respondOverlap(body, passport, env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/member/transmission/dismiss") {
+        await enforceRateLimit(request, env); const body = await readJson(request); const passport = await requirePinSession(body, env);
+        return await dismissTransmission(body, passport, env, cors);
+      }
+      if (request.method === "POST" && url.pathname === "/api/member/dead-drop/claim") {
+        await enforceRateLimit(request, env); const body = await readJson(request); const passport = await requirePinSession(body, env);
+        return await claimDeadDrop(body, passport, env, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/rewards/redeem") {
         await enforceRateLimit(request, env);
@@ -113,9 +151,10 @@ export default {
       if (request.method === "POST" && url.pathname.startsWith("/api/admin/")) {
         await enforceRateLimit(request, env, "admin", 300, 10 * 60 * 1000);
         await requireAdmin(request, env);
-        await auditSecurityEvent(env, "admin_action", null, url.pathname, "authorized");
+        if (!ADMIN_READ_ROUTES.has(url.pathname)) await auditSecurityEvent(env, "admin_write_requested", null, url.pathname, "authorized");
         const body = await readJson(request);
         if (url.pathname === "/api/admin/passports/search") return await searchPassports(body.query, env, cors);
+        if (url.pathname === "/api/admin/activity") return await listAdminActivity(env, cors);
         if (url.pathname === "/api/admin/passports/details") return await getAdminPassport(body.passportId, env, cors);
         if (url.pathname === "/api/admin/passports/reset-pin") return await adminResetPin(body, env, cors);
         if (url.pathname === "/api/admin/passports/dismiss-pin-reset") return await dismissPinReset(body, env, cors);
@@ -129,6 +168,7 @@ export default {
         if (url.pathname === "/api/admin/events/create") return await createEvent(body, env, cors);
         if (url.pathname === "/api/admin/events/list") return await listAdminEvents(env, cors);
         if (url.pathname === "/api/admin/events/set-code") return await setEventCode(body, env, cors);
+        if (url.pathname === "/api/admin/events/set-active") return await setEventActive(body, env, cors);
         if (url.pathname === "/api/admin/nfc/member") return await getNfcAssignment(body, env, cors);
         if (url.pathname === "/api/admin/nfc/assign") return await assignNfcCard(body, env, cors);
         if (url.pathname === "/api/admin/nfc/remove") return await removeNfcCard(body, env, cors);
@@ -181,6 +221,22 @@ export default {
         if (url.pathname === "/api/admin/membership/grant-nomination") return await grantNominationAccess(body, env, cors);
         if (url.pathname === "/api/admin/membership/update") return await updateMembershipRequest(body, env, cors);
         if (url.pathname === "/api/admin/membership/available-cards") return await listAvailableInvitationCards(env, cors);
+        if (url.pathname === "/api/admin/corrections/list") return await listAdminCorrections(env, cors);
+        if (url.pathname === "/api/admin/corrections/create") return await createAdminCorrection(body, env, cors);
+        if (url.pathname === "/api/admin/command-center") return await getCommandCenter(body, env, cors);
+        if (url.pathname === "/api/admin/watchlist/save") return await saveWatchlist(body, env, cors);
+        if (url.pathname === "/api/admin/member/note") return await saveMemberNote(body, env, cors);
+        if (url.pathname === "/api/admin/member/operations") return await getMemberOperations(body, env, cors);
+        if (url.pathname === "/api/admin/technique/catalog") return await listSkillCatalog(env, cors);
+        if (url.pathname === "/api/admin/technique/target-members") return await listTargetMembers(body, env, cors);
+        if (url.pathname === "/api/admin/technique/skill/save") return await saveSkill(body, env, cors);
+        if (url.pathname === "/api/admin/technique/complementarity/save") return await saveComplementarity(body, env, cors);
+        if (url.pathname === "/api/admin/technique/suggest") return await suggestTarget(body, env, cors);
+        if (url.pathname === "/api/admin/technique/overlap-radar") return await buildOverlapRadar(body, env, cors);
+        if (url.pathname === "/api/admin/technique/overlap-activate") return await activateOverlap(body, env, cors);
+        if (url.pathname === "/api/admin/transmissions/send") return await sendManualTransmission(body, env, cors);
+        if (url.pathname === "/api/admin/dead-drops/save") return await saveDeadDrop(body, env, cors);
+        if (url.pathname === "/api/admin/ghost-missions/configure") return await configureGhostMission(body, env, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/health") return json({ status: "ok" }, 200, cors);
       return json({ error: "Not found." }, 404, cors);
@@ -203,17 +259,20 @@ async function lookupCard(rawCardId, accessToken, env, cors) {
   return json({ status: "claimed", passport: await buildPublicPassport(passport, env) }, 200, cors);
 }
 
-async function claimCard(rawCardId, rawMemberName, env, cors) {
+async function claimCard(rawCardId, rawMemberName, adultConfirmed, termsAccepted, privacyAcknowledged, env, cors) {
   const cardId = normalizeCardId(rawCardId);
   const memberName = normalizeMemberName(rawMemberName);
+  requireLegalAcceptance(adultConfirmed, termsAccepted, privacyAcknowledged);
   const cardHash = await sha256(cardId);
   const result = await env.DB.prepare(`
     UPDATE passports
-    SET status = 'claimed', member_name = ?, activation_date = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    SET status = 'claimed', member_name = ?, activation_date = CURRENT_TIMESTAMP,
+        adult_confirmed_at = CURRENT_TIMESTAMP, terms_accepted_at = CURRENT_TIMESTAMP,
+        privacy_acknowledged_at = CURRENT_TIMESTAMP, legal_version = ?, updated_at = CURRENT_TIMESTAMP
     WHERE card_id = (SELECT id FROM cards WHERE card_hash = ? AND disabled_at IS NULL)
       AND status = 'unclaimed'
     RETURNING id
-  `).bind(memberName, cardHash).first();
+  `).bind(memberName, LEGAL_VERSION, cardHash).first();
 
   if (!result) {
     const existing = await getPassportByHash(cardHash, env);
@@ -223,6 +282,25 @@ async function claimCard(rawCardId, rawMemberName, env, cors) {
   }
   const passport = await getPassportByHash(cardHash, env);
   return json({ status: "pin_setup", cardNumber: passport.card_number }, 201, cors);
+}
+
+function requireLegalAcceptance(adultConfirmed, termsAccepted, privacyAcknowledged) {
+  if (adultConfirmed !== true) throw new HttpError(403, "Underground membership is limited to adults age 18 or older.");
+  if (termsAccepted !== true || privacyAcknowledged !== true) {
+    throw new HttpError(400, "You must accept the Terms and acknowledge the Privacy Policy to continue.");
+  }
+}
+
+async function acceptMemberLegalTerms(body, passport, env, cors) {
+  requireLegalAcceptance(body.adultConfirmed, body.termsAccepted, body.privacyAcknowledged);
+  await env.DB.prepare(`
+    UPDATE passports SET adult_confirmed_at = CURRENT_TIMESTAMP, terms_accepted_at = CURRENT_TIMESTAMP,
+      privacy_acknowledged_at = CURRENT_TIMESTAMP, legal_version = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(LEGAL_VERSION, passport.passport_id).run();
+  await auditSecurityEvent(env, "member_legal_acceptance", passport.passport_id, "/api/member/legal/accept", "completed", { legalVersion: LEGAL_VERSION });
+  const refreshed = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
+  return json({ status: "accepted", passport: await buildPublicPassport(refreshed, env) }, 200, cors);
 }
 
 async function setupCardPin(body, env, cors) {
@@ -290,9 +368,12 @@ async function hasValidPinSession(passportId, accessToken, env) {
   return Boolean(session);
 }
 
-async function requirePinSession(body, env) {
+async function requirePinSession(body, env, allowLegalPending = false) {
   const passport = await getPassportByHash(await sha256(normalizeCardId(body.cardId)), env);
   if (!passport || passport.disabled_at || !await hasValidPinSession(passport.passport_id, body.accessToken, env)) throw new HttpError(401, "Enter your card PIN again.");
+  if (!allowLegalPending && (!passport.adult_confirmed_at || !passport.terms_accepted_at || !passport.privacy_acknowledged_at || passport.legal_version !== LEGAL_VERSION)) {
+    throw new HttpError(403, "Review and accept the current adult-use Terms and Privacy Policy to continue.");
+  }
   return passport;
 }
 
@@ -325,10 +406,14 @@ async function dismissPinReset(body, env, cors) {
 async function getPassportByHash(cardHash, env) {
   return env.DB.prepare(`
     SELECT c.card_number, c.disabled_at, p.id AS passport_id, p.status, p.member_name, p.activation_date, p.underground_intro_seen_at, p.pin_hash, p.pin_salt, p.pin_failed_attempts, p.pin_locked_until,
+      p.adult_confirmed_at, p.terms_accepted_at, p.privacy_acknowledged_at, p.legal_version,
       EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
-      (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
-      (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
-      (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id) AS mission_count,
+      (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1
+      )) AS attendance_count,
+      (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mc.id AND ac.affects_effective_state = 1
+      )) AS mission_count,
       (SELECT COALESCE(SUM(kt.amount), 0) FROM key_transactions kt WHERE kt.passport_id = p.id) AS key_balance
     FROM cards c JOIN passports p ON p.card_id = c.id
     WHERE c.card_hash = ? LIMIT 1
@@ -340,17 +425,21 @@ async function buildPublicPassport(passport, env) {
   const membershipAccess = await ensureMembershipCapabilities(passport.passport_id, env);
   const relayCode = await ensureMemberRelayCode(passport.passport_id, env);
   const techniqueLab = await buildTechniqueLab(passport.passport_id, env, false);
+  const commandLayer = await buildMemberCommandLayer(passport, env);
   const workshop = await buildWorkshop(passport.passport_id, Number(passport.mission_count || 0), env);
   const classifieds = await buildClassifieds(passport, env);
   const doorAccess = { state: workshop.clearanceGranted ? "open" : "locked" };
   const [missionsResult, latestKeyTransaction, milestonesResult, invitation, rewardsResult, signalsResult, archiveResult] = await Promise.all([
     env.DB.prepare(`
       SELECT m.code, m.title, m.description, m.key_reward, m.repeatable, m.cooldown_hours, m.verification_required, m.relay_verification_required, m.counts_as_event, m.scope, m.social_checkin_only,
+        m.visibility_mode, m.trigger_type, m.trigger_value, m.operator_active,
         ma.status AS assignment_status,
         COUNT(mc.id) AS completion_count, MAX(mc.verified_at) AS completed_at,
         COALESCE(SUM(CASE WHEN kt.amount > 0 THEN kt.amount ELSE 0 END), 0) AS keys_earned
       FROM missions m
-      LEFT JOIN mission_completions mc ON mc.mission_id = m.id AND mc.passport_id = ?
+      LEFT JOIN mission_completions mc ON mc.mission_id = m.id AND mc.passport_id = ? AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mc.id AND ac.affects_effective_state = 1
+      )
       LEFT JOIN key_transactions kt ON kt.reason_type = 'mission' AND kt.reason_id = mc.id
       LEFT JOIN mission_assignments ma ON ma.mission_id = m.id AND ma.passport_id = ? AND ma.status = 'active'
       WHERE m.active = 1
@@ -363,13 +452,17 @@ async function buildPublicPassport(passport, env) {
     `).bind(passport.passport_id, passport.passport_id).all(),
     env.DB.prepare(`
       SELECT id, amount, description, created_at FROM key_transactions
-      WHERE passport_id = ? AND amount > 0 ORDER BY created_at DESC, id DESC LIMIT 1
+      WHERE passport_id = ? AND amount > 0 AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = key_transactions.reason_id AND ac.affects_effective_state = 1
+      ) ORDER BY created_at DESC, id DESC LIMIT 1
     `).bind(passport.passport_id).first(),
     env.DB.prepare(`
       SELECT m.code, m.title, m.description, m.reveal_text, m.criteria_type, m.threshold, m.claimable_by_code, m.member_claimable,
         pm.achieved_at
       FROM milestones m
-      LEFT JOIN passport_milestones pm ON pm.milestone_id = m.id AND pm.passport_id = ?
+      LEFT JOIN passport_milestones pm ON pm.milestone_id = m.id AND pm.passport_id = ? AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'passport_milestone' AND ac.target_id = CAST(pm.id AS TEXT) AND ac.affects_effective_state = 1
+      )
       WHERE m.active = 1 AND (m.hidden_until_achieved = 0 OR pm.achieved_at IS NOT NULL)
       ORDER BY m.sort_order, m.id
     `).bind(passport.passport_id).all(),
@@ -377,7 +470,8 @@ async function buildPublicPassport(passport, env) {
       SELECT kicker, title, description, button_label, button_url, social_checkin_visible, signals_visible, updated_at,
         (SELECT COUNT(DISTINCT ea.passport_id)
          FROM event_attendance ea
-         WHERE ea.event_id = (SELECT id FROM events WHERE active = 1 ORDER BY starts_at DESC, id DESC LIMIT 1)) AS social_checkin_count
+         WHERE ea.event_id = (SELECT id FROM events WHERE active = 1 ORDER BY starts_at DESC, id DESC LIMIT 1)
+           AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1)) AS social_checkin_count
       FROM invitation_settings WHERE id = 1
     `).first(),
     env.DB.prepare(`
@@ -408,12 +502,17 @@ async function buildPublicPassport(passport, env) {
     achieved: Boolean(milestone.achieved_at),
     achievedAt: milestone.achieved_at
   }));
+  const visibleMissions = [];
+  for (const mission of missionsResult.results || []) {
+    if (mission.visibility_mode !== "ghost" || await isGhostMissionEligible(mission, passport, env)) visibleMissions.push(mission);
+  }
 
   return {
     cardNumber: passport.card_number,
     memberName: passport.member_name,
     activationDate: passport.activation_date,
     introSeen: Boolean(passport.underground_intro_seen_at),
+    legalAcceptanceRequired: !passport.adult_confirmed_at || !passport.terms_accepted_at || !passport.privacy_acknowledged_at || passport.legal_version !== LEGAL_VERSION,
     attendanceCount: Number(passport.attendance_count || 0),
     milestoneCount: milestones.filter((milestone) => milestone.achieved).length,
     missionCount: Number(passport.mission_count || 0),
@@ -426,6 +525,9 @@ async function buildPublicPassport(passport, env) {
     classifieds,
     membershipAccess,
     techniqueLab,
+    transmissions: commandLayer.transmissions,
+    deadDrops: commandLayer.deadDrops,
+    activeOverlaps: commandLayer.overlaps,
     archiveEntries: (archiveResult.results || []).map(toArchiveEntry),
     signals: (signalsResult.results || []).map((signal) => ({
       code: signal.public_code,
@@ -449,7 +551,7 @@ async function buildPublicPassport(passport, env) {
       code: reward.code, title: reward.title, description: reward.description,
       keyCost: Number(reward.key_cost), pending: Boolean(reward.pending)
     })),
-    missions: (missionsResult.results || []).map((mission) => ({
+    missions: visibleMissions.map((mission) => ({
       code: mission.code,
       title: mission.title,
       description: mission.description,
@@ -462,6 +564,7 @@ async function buildPublicPassport(passport, env) {
       scope: mission.scope,
       privateAssignment: mission.scope === "individual",
       socialCheckinOnly: Boolean(mission.social_checkin_only),
+      ghostMission: mission.visibility_mode === "ghost",
       assignmentStatus: mission.assignment_status || null,
       completed: Number(mission.completion_count) > 0,
       completionCount: Number(mission.completion_count),
@@ -494,24 +597,22 @@ async function buildClassifieds(passport, env) {
   const [listings, received, sharedContacts, contact] = await Promise.all([
     env.DB.prepare(`
       SELECT cl.id, cl.category, cl.title, cl.description, cl.availability, cl.created_at, cl.expires_at,
-        cl.passport_id = ? AS is_owner, c.card_number,
+        cl.passport_id = ? AS is_owner,
         EXISTS(SELECT 1 FROM classified_responses cr WHERE cr.listing_id = cl.id AND cr.responder_passport_id = ?) AS has_responded
-      FROM classified_listings cl JOIN passports p ON p.id = cl.passport_id JOIN cards c ON c.id = p.card_id
+      FROM classified_listings cl
       WHERE cl.status = 'active' AND cl.expires_at > CURRENT_TIMESTAMP ORDER BY cl.created_at DESC
     `).bind(passport.passport_id, passport.passport_id).all(),
     env.DB.prepare(`
-      SELECT cr.id, cr.message, cr.status, cr.created_at, cl.title AS listing_title, c.card_number AS responder_card_number
+      SELECT cr.id, cr.message, cr.status, cr.created_at, cl.title AS listing_title
       FROM classified_responses cr
       JOIN classified_listings cl ON cl.id = cr.listing_id
-      JOIN passports p ON p.id = cr.responder_passport_id JOIN cards c ON c.id = p.card_id
       WHERE cl.passport_id = ? AND cr.status IN ('pending', 'contact_shared')
       ORDER BY cr.created_at DESC
     `).bind(passport.passport_id).all(),
     env.DB.prepare(`
-      SELECT cr.id, cl.title AS listing_title, c.card_number AS owner_card_number, cc.contact_type, cc.contact_value
+      SELECT cr.id, cl.title AS listing_title, cc.contact_type, cc.contact_value
       FROM classified_responses cr
       JOIN classified_listings cl ON cl.id = cr.listing_id
-      JOIN passports owner ON owner.id = cl.passport_id JOIN cards c ON c.id = owner.card_id
       JOIN classified_contacts cc ON cc.passport_id = cl.passport_id
       WHERE cr.responder_passport_id = ? AND cr.status = 'contact_shared'
       ORDER BY cr.updated_at DESC
@@ -524,15 +625,15 @@ async function buildClassifieds(passport, env) {
     listings: (listings.results || []).map((listing) => ({
       id: listing.id, category: CLASSIFIED_CATEGORIES.get(listing.category) || "Other", categoryCode: listing.category,
       title: listing.title, description: listing.description, availability: listing.availability || "",
-      operative: `Operative ${listing.card_number}`, postedAt: listing.created_at, expiresAt: listing.expires_at,
+      memberLabel: listing.is_owner ? "Your listing" : "Underground member", postedAt: listing.created_at, expiresAt: listing.expires_at,
       isOwner: Boolean(listing.is_owner), hasResponded: Boolean(listing.has_responded)
     })),
     responses: (received.results || []).map((response) => ({
       id: response.id, listingTitle: response.listing_title, message: response.message,
-      operative: `Operative ${response.responder_card_number}`, status: response.status, createdAt: response.created_at
+      memberLabel: "Underground member", status: response.status, createdAt: response.created_at
     })),
     contacts: (sharedContacts.results || []).map((share) => ({
-      responseId: share.id, listingTitle: share.listing_title, operative: `Operative ${share.owner_card_number}`,
+      responseId: share.id, listingTitle: share.listing_title, memberLabel: "Underground member",
       contact: formatClassifiedContact(share.contact_type, share.contact_value)
     }))
   };
@@ -557,6 +658,7 @@ async function createClassified(body, passport, env, cors) {
   const title = normalizeMissionText(body.title, "Title", 3, 60);
   const description = normalizeMissionText(body.description, "Description", 10, 400);
   const availability = normalizeOptionalText(body.availability, "Availability", 160);
+  rejectDirectContactDetails(`${title} ${description} ${availability}`);
   await env.DB.prepare(`
     INSERT INTO classified_listings (id, passport_id, category, title, description, availability, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))
@@ -580,6 +682,7 @@ async function respondToClassified(body, passport, env, cors) {
   await requireClassifiedClearance(passport, env);
   const listingId = String(body.listingId || "").trim();
   const message = normalizeMissionText(body.message, "Response", 2, 150);
+  rejectDirectContactDetails(message);
   const listing = await env.DB.prepare(`SELECT id, passport_id FROM classified_listings WHERE id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP`).bind(listingId).first();
   if (!listing) throw new HttpError(404, "That Classified is no longer active.");
   if (Number(listing.passport_id) === Number(passport.passport_id)) throw new HttpError(400, "You cannot respond to your own Classified.");
@@ -628,6 +731,10 @@ async function reportClassifiedContent(body, passport, env, cors) {
   const table = targetType === "listing" ? "classified_listings" : "classified_responses";
   if (!await env.DB.prepare(`SELECT 1 AS found FROM ${table} WHERE id = ? LIMIT 1`).bind(targetId).first()) throw new HttpError(404, "Classified content not found.");
   const reason = normalizeOptionalText(body.reason, "Report note", 200);
+  const reportColumn = targetType === "listing" ? "listing_id" : "response_id";
+  const existingReport = await env.DB.prepare(`SELECT 1 AS found FROM classified_reports WHERE reporter_passport_id = ? AND ${reportColumn} = ? AND status = 'pending' LIMIT 1`)
+    .bind(passport.passport_id, targetId).first();
+  if (existingReport) throw new HttpError(409, "You already reported this item. The JustBaila team will review it.");
   await env.DB.prepare(`INSERT INTO classified_reports (id, reporter_passport_id, listing_id, response_id, reason) VALUES (?, ?, ?, ?, ?)`)
     .bind(`report_${crypto.randomUUID()}`, passport.passport_id, targetType === "listing" ? targetId : null, targetType === "response" ? targetId : null, reason).run();
   return json({ status: "reported" }, 201, cors);
@@ -659,6 +766,7 @@ async function adminRemoveClassified(body, env, cors) {
   const listingId = String(body.listingId || "").trim();
   const result = await env.DB.prepare(`UPDATE classified_listings SET status = 'removed', closed_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id`).bind(listingId).first();
   if (!result) throw new HttpError(404, "Classified not found.");
+  await auditSecurityEvent(env, "classified_removed", null, "/api/admin/classifieds/remove", "completed", { listingId });
   return json({ status: "removed" }, 200, cors);
 }
 
@@ -666,6 +774,7 @@ async function resolveClassifiedReport(body, env, cors) {
   const reportId = String(body.reportId || "").trim();
   const result = await env.DB.prepare(`UPDATE classified_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending' RETURNING id`).bind(reportId).first();
   if (!result) throw new HttpError(404, "Pending report not found.");
+  await auditSecurityEvent(env, "classified_report_resolved", null, "/api/admin/classifieds/resolve-report", "completed", { reportId });
   return json({ status: "resolved" }, 200, cors);
 }
 
@@ -709,7 +818,9 @@ async function buildWorkshop(passportId, missionCount, env) {
     SELECT wc.code, wc.title, wc.description, wc.workshop_level, wc.required_for_advance, wc.verification_required,
       wc.key_reward, wc.sort_order, wco.completed_at
     FROM workshop_challenges wc
-    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ?
+    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ? AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'workshop_completion' AND ac.target_id = wco.id AND ac.affects_effective_state = 1
+    )
     WHERE wc.active = 1 ORDER BY wc.workshop_level, wc.sort_order, wc.id
   `).bind(passportId).all();
   const allChallenges = result.results || [];
@@ -773,7 +884,9 @@ async function advanceWorkshopIfReady(passportId, levelNumber, env) {
     SELECT COUNT(*) AS required_count,
       SUM(CASE WHEN wco.id IS NULL THEN 1 ELSE 0 END) AS incomplete_count
     FROM workshop_challenges wc
-    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ?
+    LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ? AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'workshop_completion' AND ac.target_id = wco.id AND ac.affects_effective_state = 1
+    )
     WHERE wc.active = 1 AND wc.required_for_advance = 1 AND wc.workshop_level = ?
   `).bind(passportId, levelNumber).first();
   if (Number(status?.required_count || 0) > 0 && Number(status?.incomplete_count || 0) === 0) {
@@ -803,6 +916,7 @@ async function createWorkshopChallenge(body, env, cors) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(code, challenge.title, challenge.description, challenge.level, challenge.required, challenge.verificationRequired,
     challenge.verificationCodeHash, challenge.verificationCodeDisplay, challenge.keyReward, challenge.sortOrder).run();
+  await auditSecurityEvent(env, "workshop_challenge_created", null, "/api/admin/workshop/create", "completed", { code, title: challenge.title, level: challenge.level });
   return json({ status: "created", code }, 201, cors);
 }
 
@@ -817,6 +931,7 @@ async function updateWorkshopChallenge(body, env, cors) {
     WHERE code = ?
   `).bind(challenge.title, challenge.description, challenge.level, challenge.required, challenge.verificationRequired,
     challenge.verificationCodeHash, challenge.verificationCodeDisplay, challenge.keyReward, challenge.sortOrder, code).run();
+  await auditSecurityEvent(env, "workshop_challenge_updated", null, "/api/admin/workshop/update", "completed", { code, previousLevel: Number(existing.workshop_level), level: challenge.level });
   return json({ status: "updated" }, 200, cors);
 }
 
@@ -825,6 +940,7 @@ async function setWorkshopChallengeActive(body, env, cors) {
   const active = normalizeBoolean(body.active);
   const result = await env.DB.prepare(`UPDATE workshop_challenges SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`).bind(active, code).first();
   if (!result) throw new HttpError(404, "Workshop challenge not found.");
+  await auditSecurityEvent(env, active ? "workshop_challenge_activated" : "workshop_challenge_deactivated", null, "/api/admin/workshop/set-active", "completed", { code });
   return json({ status: active ? "restored" : "deactivated" }, 200, cors);
 }
 
@@ -866,6 +982,7 @@ async function getLifetimeKeysEarned(passportId, env) {
     FROM key_transactions kt
     JOIN mission_completions mc ON mc.id = kt.reason_id AND mc.passport_id = kt.passport_id
     WHERE kt.passport_id = ? AND kt.transaction_type = 'earned' AND kt.reason_type = 'mission' AND kt.amount > 0
+      AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mc.id AND ac.affects_effective_state = 1)
   `).bind(passportId).first();
   return Number(result?.lifetime_keys || 0);
 }
@@ -1229,6 +1346,7 @@ async function createArchiveEntry(body, env, cors) {
     INSERT INTO archive_entries (code, label, title, body, content_type, action_label, href, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(code, entry.label, entry.title, entry.body, entry.contentType, entry.actionLabel, entry.href, Number(sortResult.next_order)).run();
+  await auditSecurityEvent(env, "archive_entry_created", null, "/api/admin/archive/create", "completed", { code, title: entry.title });
   return json({ status: "created", code }, 201, cors);
 }
 
@@ -1240,6 +1358,7 @@ async function updateArchiveEntry(body, env, cors) {
     WHERE code = ? RETURNING id
   `).bind(entry.label, entry.title, entry.body, entry.contentType, entry.actionLabel, entry.href, code).first();
   if (!result) throw new HttpError(404, "Archive file not found.");
+  await auditSecurityEvent(env, "archive_entry_updated", null, "/api/admin/archive/update", "completed", { code, title: entry.title });
   return json({ status: "updated" }, 200, cors);
 }
 
@@ -1248,6 +1367,7 @@ async function setArchiveEntryActive(body, env, cors) {
   const active = normalizeBoolean(body.active);
   const result = await env.DB.prepare(`UPDATE archive_entries SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ? RETURNING id`).bind(active, code).first();
   if (!result) throw new HttpError(404, "Archive file not found.");
+  await auditSecurityEvent(env, active ? "archive_entry_activated" : "archive_entry_deactivated", null, "/api/admin/archive/set-active", "completed", { code });
   return json({ status: active ? "restored" : "hidden" }, 200, cors);
 }
 
@@ -1284,13 +1404,19 @@ async function evaluateMilestones(passportId, env) {
       AND m.criteria_type IS NOT NULL
       AND m.threshold IS NOT NULL
       AND (
-        (m.criteria_type = 'events' AND (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = ?) >= m.threshold)
+        (m.criteria_type = 'events' AND (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = ? AND NOT EXISTS (
+          SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1
+        )) >= m.threshold)
         OR (m.criteria_type = 'event_locations' AND (
           SELECT COUNT(DISTINCT LOWER(TRIM(e.location)))
           FROM event_attendance ea JOIN events e ON e.id = ea.event_id
-          WHERE ea.passport_id = ? AND e.location IS NOT NULL AND TRIM(e.location) != ''
+          WHERE ea.passport_id = ? AND e.location IS NOT NULL AND TRIM(e.location) != '' AND NOT EXISTS (
+            SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1
+          )
         ) >= m.threshold)
-        OR (m.criteria_type = 'missions' AND (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = ?) >= m.threshold)
+        OR (m.criteria_type = 'missions' AND (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = ? AND NOT EXISTS (
+          SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mc.id AND ac.affects_effective_state = 1
+        )) >= m.threshold)
         OR (m.criteria_type = 'keys' AND (SELECT COALESCE(SUM(kt.amount), 0) FROM key_transactions kt WHERE kt.passport_id = ?) >= m.threshold)
         OR (m.criteria_type = 'signal_received' AND (
           EXISTS (SELECT 1 FROM signals s WHERE s.original_holder_id = ?)
@@ -1358,6 +1484,189 @@ async function evaluateMilestones(passportId, env) {
   ).run();
 }
 
+async function listAdminActivity(env, cors) {
+  const rows = await env.DB.prepare(`
+    SELECT category, title, detail, member, occurred_at AS occurredAt FROM (
+      SELECT 'member' category, 'Member activated' title, 'Card ' || c.card_number detail,
+        p.member_name member, p.activation_date occurred_at
+      FROM passports p JOIN cards c ON c.id = p.card_id
+      WHERE p.activation_date IS NOT NULL
+      UNION ALL
+      SELECT 'mission', 'Mission completed', m.title, p.member_name, mc.verified_at
+      FROM mission_completions mc JOIN missions m ON m.id = mc.mission_id JOIN passports p ON p.id = mc.passport_id
+      UNION ALL
+      SELECT 'event', 'Event check-in', e.title || CASE WHEN e.location IS NULL OR e.location = '' THEN '' ELSE ' · ' || e.location END,
+        p.member_name, ea.checked_in_at
+      FROM event_attendance ea JOIN events e ON e.id = ea.event_id JOIN passports p ON p.id = ea.passport_id
+      UNION ALL
+      SELECT 'milestone', 'Milestone unlocked', m.title, p.member_name, pm.achieved_at
+      FROM passport_milestones pm JOIN milestones m ON m.id = pm.milestone_id JOIN passports p ON p.id = pm.passport_id
+      UNION ALL
+      SELECT 'reward', CASE WHEN rr.status = 'fulfilled' THEN 'Reward fulfilled' ELSE 'Reward redeemed' END,
+        r.name || ' · ' || rr.keys_spent || ' Keys', p.member_name, COALESCE(rr.fulfilled_at, rr.redeemed_at)
+      FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id JOIN passports p ON p.id = rr.passport_id
+      UNION ALL
+      SELECT 'signal', 'Signal relayed', s.title || ' · ' || s.public_code,
+        sender.member_name || ' → ' || recipient.member_name, sr.relayed_at
+      FROM signal_relays sr JOIN signals s ON s.id = sr.signal_id
+        JOIN passports sender ON sender.id = sr.sender_passport_id
+        JOIN passports recipient ON recipient.id = sr.recipient_passport_id
+      UNION ALL
+      SELECT 'security', 'Access or security change', sal.event_type || ' · ' || sal.outcome,
+        p.member_name, sal.occurred_at
+      FROM security_audit_log sal LEFT JOIN passports p ON p.id = sal.actor_passport_id
+      UNION ALL
+      SELECT 'correction', 'Historical correction', ac.target_type || ' · ' || ac.effect_summary,
+        p.member_name, ac.corrected_at
+      FROM admin_corrections ac LEFT JOIN passports p ON p.id = ac.passport_id
+    ) ORDER BY occurred_at DESC LIMIT 150
+  `).all();
+  return json({ activity: rows.results || [] }, 200, cors);
+}
+
+async function listAdminCorrections(env, cors) {
+  const [correctable, corrections] = await Promise.all([
+    env.DB.prepare(`
+      SELECT target_type, target_id, passport_id, member, label, occurred_at FROM (
+        SELECT 'mission_completion' target_type, mc.id target_id, mc.passport_id, p.member_name member,
+          'Mission: ' || m.title label, mc.verified_at occurred_at
+        FROM mission_completions mc JOIN missions m ON m.id = mc.mission_id JOIN passports p ON p.id = mc.passport_id
+        UNION ALL SELECT 'event_attendance', CAST(ea.id AS TEXT), ea.passport_id, p.member_name,
+          'Attendance: ' || e.title, ea.checked_in_at
+        FROM event_attendance ea JOIN events e ON e.id = ea.event_id JOIN passports p ON p.id = ea.passport_id
+        UNION ALL SELECT 'passport_milestone', CAST(pm.id AS TEXT), pm.passport_id, p.member_name,
+          'Milestone: ' || m.title, pm.achieved_at
+        FROM passport_milestones pm JOIN milestones m ON m.id = pm.milestone_id JOIN passports p ON p.id = pm.passport_id
+        UNION ALL SELECT 'workshop_completion', wc.id, wc.passport_id, p.member_name,
+          'Workshop: ' || challenge.title, wc.completed_at
+        FROM workshop_completions wc JOIN workshop_challenges challenge ON challenge.id = wc.challenge_id JOIN passports p ON p.id = wc.passport_id
+        UNION ALL SELECT 'technique_check', tc.id, tc.passport_id, p.member_name,
+          'Technique: ' || competency.name || ' · ' || tc.result, tc.checked_at
+        FROM technique_checks tc JOIN technique_competencies competency ON competency.id = tc.competency_id JOIN passports p ON p.id = tc.passport_id
+        UNION ALL SELECT 'signal_relay', sr.id, sr.sender_passport_id, sender.member_name,
+          'Signal: ' || s.public_code || ' → ' || recipient.member_name, sr.relayed_at
+        FROM signal_relays sr JOIN signals s ON s.id = sr.signal_id JOIN passports sender ON sender.id = sr.sender_passport_id JOIN passports recipient ON recipient.id = sr.recipient_passport_id
+        UNION ALL SELECT 'reward_fulfillment', rr.id, rr.passport_id, p.member_name,
+          'Reward fulfilled: ' || r.name, rr.fulfilled_at
+        FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id JOIN passports p ON p.id = rr.passport_id WHERE rr.status = 'fulfilled'
+      ) history
+      WHERE NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = history.target_type AND ac.target_id = history.target_id)
+      ORDER BY occurred_at DESC LIMIT 150
+    `).all(),
+    env.DB.prepare(`
+      SELECT ac.*, p.member_name FROM admin_corrections ac LEFT JOIN passports p ON p.id = ac.passport_id
+      ORDER BY ac.corrected_at DESC LIMIT 150
+    `).all()
+  ]);
+  return json({ correctable: correctable.results || [], corrections: corrections.results || [] }, 200, cors);
+}
+
+async function createAdminCorrection(body, env, cors) {
+  const targetType = String(body.targetType || "").trim();
+  const targetId = String(body.targetId || "").trim();
+  const reason = normalizeOptionalText(body.reason, "Correction reason", 500);
+  if (!targetId) throw new HttpError(400, "Choose a historical record.");
+  if (!reason) throw new HttpError(400, "A correction reason is required.");
+  const correctionId = `correction_${crypto.randomUUID()}`;
+  let passportId;
+  let correctionKind = "reversed";
+  let affectsEffectiveState = 1;
+  let effectSummary;
+  const statements = [];
+
+  if (targetType === "mission_completion") {
+    const record = await env.DB.prepare(`SELECT mc.passport_id, mc.mission_id, m.title, m.scope, COALESCE(kt.amount, 0) key_amount
+      FROM mission_completions mc JOIN missions m ON m.id = mc.mission_id
+      LEFT JOIN key_transactions kt ON kt.reason_type = 'mission' AND kt.reason_id = mc.id WHERE mc.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Mission completion not found.");
+    passportId = Number(record.passport_id);
+    effectSummary = `Mission completion excluded; ${Number(record.key_amount)} Key effect reversed.`;
+    if (Number(record.key_amount)) statements.push(env.DB.prepare(`INSERT INTO key_transactions
+      (id, passport_id, amount, transaction_type, reason_type, reason_id, description, created_by)
+      VALUES (?, ?, ?, 'adjustment', 'adjustment', ?, ?, 'correction')`).bind(`key_${correctionId}`, passportId, -Number(record.key_amount), correctionId, `Correction: ${record.title}`));
+    if (record.scope === "individual") statements.push(env.DB.prepare(`UPDATE mission_assignments SET status = 'active', completed_at = NULL
+      WHERE passport_id = ? AND mission_id = ? AND status = 'completed'`).bind(passportId, record.mission_id));
+  } else if (targetType === "event_attendance") {
+    const record = await env.DB.prepare(`SELECT ea.passport_id, e.title FROM event_attendance ea JOIN events e ON e.id = ea.event_id WHERE ea.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Attendance record not found.");
+    passportId = Number(record.passport_id); effectSummary = `Attendance at ${record.title} excluded from effective counts.`;
+  } else if (targetType === "passport_milestone") {
+    const record = await env.DB.prepare(`SELECT pm.passport_id, m.title FROM passport_milestones pm JOIN milestones m ON m.id = pm.milestone_id WHERE pm.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Milestone record not found.");
+    passportId = Number(record.passport_id); effectSummary = `Milestone ${record.title} excluded from effective achievements.`;
+  } else if (targetType === "workshop_completion") {
+    const record = await env.DB.prepare(`SELECT wc.passport_id, challenge.title, COALESCE(kt.amount, 0) key_amount
+      FROM workshop_completions wc JOIN workshop_challenges challenge ON challenge.id = wc.challenge_id
+      LEFT JOIN key_transactions kt ON kt.reason_type = 'adjustment' AND kt.reason_id = wc.id WHERE wc.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Workshop completion not found.");
+    passportId = Number(record.passport_id); effectSummary = `Workshop completion excluded; ${Number(record.key_amount)} Key effect reversed.`;
+    if (Number(record.key_amount)) statements.push(env.DB.prepare(`INSERT INTO key_transactions
+      (id, passport_id, amount, transaction_type, reason_type, reason_id, description, created_by)
+      VALUES (?, ?, ?, 'adjustment', 'adjustment', ?, ?, 'correction')`).bind(`key_${correctionId}`, passportId, -Number(record.key_amount), correctionId, `Correction: ${record.title}`));
+  } else if (targetType === "technique_check") {
+    const record = await env.DB.prepare(`SELECT tc.passport_id, competency.name FROM technique_checks tc JOIN technique_competencies competency ON competency.id = tc.competency_id WHERE tc.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Technique evaluation not found.");
+    passportId = Number(record.passport_id); effectSummary = `Technique evaluation for ${record.name} excluded from current status.`;
+  } else if (targetType === "signal_relay") {
+    const record = await env.DB.prepare(`SELECT sr.passport_id, sr.signal_id, sr.sender_passport_id, sr.recipient_passport_id,
+      EXISTS(SELECT 1 FROM signal_relays later WHERE later.signal_id = sr.signal_id AND (later.relayed_at > sr.relayed_at OR (later.relayed_at = sr.relayed_at AND later.rowid > sr.rowid))) has_later
+      FROM (SELECT signal_relays.*, sender_passport_id passport_id FROM signal_relays) sr WHERE sr.id = ?`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Signal transfer not found.");
+    passportId = Number(record.passport_id);
+    if (record.has_later) {
+      correctionKind = "invalidated"; affectsEffectiveState = 0;
+      effectSummary = "Transfer marked corrected for audit only; later transfers depend on it, so ownership history was not rewritten.";
+    } else {
+      effectSummary = "Latest transfer reversed; Signal ownership restored to the sender.";
+      statements.push(env.DB.prepare(`UPDATE signals SET current_holder_id = ?, last_relayed_at = (
+        SELECT MAX(relayed_at) FROM signal_relays WHERE signal_id = ? AND id != ?
+      ) WHERE id = ? AND current_holder_id = ?`).bind(record.sender_passport_id, record.signal_id, targetId, record.signal_id, record.recipient_passport_id));
+    }
+  } else if (targetType === "reward_fulfillment") {
+    const record = await env.DB.prepare(`SELECT rr.passport_id, r.name FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id WHERE rr.id = ? AND rr.status = 'fulfilled'`).bind(targetId).first();
+    if (!record) throw new HttpError(404, "Fulfilled reward not found.");
+    passportId = Number(record.passport_id); correctionKind = "invalidated"; affectsEffectiveState = 0;
+    effectSummary = `Fulfillment of ${record.name} marked corrected; physical fulfillment and spent Keys were not automatically rewritten.`;
+  } else {
+    throw new HttpError(400, "Correction type is not supported.");
+  }
+
+  statements.unshift(env.DB.prepare(`INSERT INTO admin_corrections
+    (id, target_type, target_id, passport_id, correction_kind, affects_effective_state, reason, effect_summary)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(correctionId, targetType, targetId, passportId || null, correctionKind, affectsEffectiveState, reason, effectSummary));
+  try { await env.DB.batch(statements); }
+  catch (error) { if (String(error).includes("UNIQUE")) throw new HttpError(409, "That record has already been corrected."); throw error; }
+  if (targetType === "workshop_completion") await recalculateWorkshopProgress(passportId, env);
+  if (targetType === "mission_completion") await reconcileMembershipCapabilities(passportId, env);
+  await auditSecurityEvent(env, "historical_record_corrected", passportId, "/api/admin/corrections/create", "completed", {
+    correctionId, targetType, targetId, correctionKind, affectsEffectiveState: Boolean(affectsEffectiveState), reason, effectSummary
+  });
+  return json({ status: correctionKind, correctionId, effectSummary }, 201, cors);
+}
+
+async function recalculateWorkshopProgress(passportId, env) {
+  let level = 1;
+  while (level < 4) {
+    const state = await env.DB.prepare(`SELECT COUNT(*) required_count,
+      SUM(CASE WHEN wco.id IS NULL THEN 1 ELSE 0 END) incomplete_count
+      FROM workshop_challenges wc LEFT JOIN workshop_completions wco ON wco.challenge_id = wc.id AND wco.passport_id = ?
+        AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'workshop_completion' AND ac.target_id = wco.id AND ac.affects_effective_state = 1)
+      WHERE wc.active = 1 AND wc.required_for_advance = 1 AND wc.workshop_level = ?`).bind(passportId, level).first();
+    if (!Number(state?.required_count || 0) || Number(state?.incomplete_count || 0)) break;
+    level += 1;
+  }
+  await env.DB.prepare(`INSERT INTO workshop_member_progress (passport_id, current_level) VALUES (?, ?)
+    ON CONFLICT(passport_id) DO UPDATE SET current_level = excluded.current_level, level_updated_at = CURRENT_TIMESTAMP`).bind(passportId, level).run();
+}
+
+async function reconcileMembershipCapabilities(passportId, env) {
+  const lifetimeKeys = await getLifetimeKeysEarned(passportId, env);
+  if (lifetimeKeys < 25) await env.DB.prepare(`DELETE FROM member_capabilities WHERE passport_id = ? AND capability = 'membership_nomination'
+    AND unlock_source = 'lifetime_keys' AND NOT EXISTS (SELECT 1 FROM membership_nominations WHERE nominator_passport_id = ?)`).bind(passportId, passportId).run();
+  if (lifetimeKeys < 75) await env.DB.prepare(`DELETE FROM member_capabilities WHERE passport_id = ? AND capability = 'membership_invitation'
+    AND unlock_source = 'lifetime_keys' AND NOT EXISTS (SELECT 1 FROM membership_invitations WHERE inviter_passport_id = ?)`).bind(passportId, passportId).run();
+}
+
 async function searchPassports(rawQuery, env, cors) {
   const query = String(rawQuery || "").trim().slice(0, 80);
   const likeQuery = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
@@ -1409,7 +1718,9 @@ async function completeMission(body, env, cors) {
   }
 
   const completion = await env.DB.prepare(`
-    SELECT COUNT(*) AS completion_count, COALESCE(MAX(completion_number), 0) AS last_completion
+    SELECT SUM(CASE WHEN NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mission_completions.id AND ac.affects_effective_state = 1
+    ) THEN 1 ELSE 0 END) AS completion_count, COALESCE(MAX(completion_number), 0) AS last_completion
     FROM mission_completions WHERE passport_id = ? AND mission_id = ?
   `).bind(passportId, mission.id).first();
   if (!mission.repeatable && Number(completion.completion_count) > 0) {
@@ -1417,7 +1728,7 @@ async function completeMission(body, env, cors) {
   }
   await enforceMissionCooldown(passportId, mission, env);
 
-  const completionNumber = mission.repeatable ? Number(completion.last_completion) + 1 : 1;
+  const completionNumber = Number(completion.last_completion) + 1;
   const keysAwarded = Number(mission.key_reward);
   const statements = [env.DB.prepare(`
     INSERT INTO mission_completions (id, passport_id, mission_id, completion_number, verified_by, note)
@@ -1440,7 +1751,9 @@ async function completeMission(body, env, cors) {
   try {
     await env.DB.batch(statements);
   } catch (error) {
-    const completed = await env.DB.prepare(`SELECT id FROM mission_completions WHERE passport_id = ? AND mission_id = ? LIMIT 1`).bind(passportId, mission.id).first();
+    const completed = await env.DB.prepare(`SELECT id FROM mission_completions WHERE passport_id = ? AND mission_id = ? AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mission_completions.id AND ac.affects_effective_state = 1
+    ) LIMIT 1`).bind(passportId, mission.id).first();
     if (!mission.repeatable && completed) throw new HttpError(409, "This mission has already been completed for this passport.");
     throw error;
   }
@@ -1506,7 +1819,9 @@ async function claimMission(body, env, cors) {
   }
 
   const completion = await env.DB.prepare(`
-    SELECT COUNT(*) AS completion_count, COALESCE(MAX(completion_number), 0) AS last_completion
+    SELECT SUM(CASE WHEN NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mission_completions.id AND ac.affects_effective_state = 1
+    ) THEN 1 ELSE 0 END) AS completion_count, COALESCE(MAX(completion_number), 0) AS last_completion
     FROM mission_completions WHERE passport_id = ? AND mission_id = ?
   `).bind(passport.passport_id, mission.id).first();
   if (!mission.repeatable && Number(completion.completion_count) > 0) {
@@ -1514,7 +1829,7 @@ async function claimMission(body, env, cors) {
   }
   await enforceMissionCooldown(passport.passport_id, mission, env);
 
-  const completionNumber = mission.repeatable ? Number(completion.last_completion) + 1 : 1;
+  const completionNumber = Number(completion.last_completion) + 1;
   const keysAwarded = Number(mission.key_reward);
   const statements = [env.DB.prepare(`
     INSERT INTO mission_completions (id, passport_id, mission_id, completion_number, verified_by, relay_verifier_passport_id)
@@ -1540,7 +1855,9 @@ async function claimMission(body, env, cors) {
   try {
     await env.DB.batch(statements);
   } catch (error) {
-    const existing = await env.DB.prepare(`SELECT id FROM mission_completions WHERE passport_id = ? AND mission_id = ? LIMIT 1`).bind(passport.passport_id, mission.id).first();
+    const existing = await env.DB.prepare(`SELECT id FROM mission_completions WHERE passport_id = ? AND mission_id = ? AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mission_completions.id AND ac.affects_effective_state = 1
+    ) LIMIT 1`).bind(passport.passport_id, mission.id).first();
     if (!mission.repeatable && existing) throw new HttpError(409, "You already completed this mission.");
     throw error;
   }
@@ -1719,13 +2036,16 @@ async function createEvent(body, env, cors) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "That event code is already in use.");
     throw error;
   }
+  await auditSecurityEvent(env, "event_created", null, "/api/admin/events/create", "completed", { title, startsAt, location });
   return json({ status: "created" }, 201, cors);
 }
 
 async function listAdminEvents(env, cors) {
   const result = await env.DB.prepare(`
     SELECT e.id, e.title, e.starts_at, e.location, e.check_in_code_display, e.active, COUNT(ea.id) AS check_in_count
-    FROM events e LEFT JOIN event_attendance ea ON ea.event_id = e.id
+    FROM events e LEFT JOIN event_attendance ea ON ea.event_id = e.id AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1
+    )
     GROUP BY e.id ORDER BY e.starts_at DESC, e.id DESC LIMIT 50
   `).all();
   return json({ events: (result.results || []).map((event) => ({
@@ -1751,7 +2071,20 @@ async function setEventCode(body, env, cors) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "That event code is already in use.");
     throw error;
   }
+  await auditSecurityEvent(env, "event_code_changed", null, "/api/admin/events/set-code", "completed", { eventId });
   return json({ status: "updated", checkInCode }, 200, cors);
+}
+
+async function setEventActive(body, env, cors) {
+  const eventId = normalizePositiveInteger(body.eventId, "Event");
+  const active = normalizeBoolean(body.active);
+  const event = await env.DB.prepare(`SELECT title, active FROM events WHERE id = ?`).bind(eventId).first();
+  if (!event) throw new HttpError(404, "Event not found.");
+  await env.DB.prepare(`UPDATE events SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(active, eventId).run();
+  await auditSecurityEvent(env, active ? "event_activated" : "event_deactivated", null, "/api/admin/events/set-active", "completed", {
+    eventId, title: event.title, previousActive: Boolean(event.active), active: Boolean(active)
+  });
+  return json({ status: active ? "activated" : "deactivated" }, 200, cors);
 }
 
 async function checkInEvent(body, env, cors) {
@@ -1818,6 +2151,7 @@ async function removeNfcCard(body, env, cors) {
     UPDATE passport_nfc_cards SET active = 0, removed_at = CURRENT_TIMESTAMP
     WHERE passport_id = ? AND active = 1 RETURNING uid
   `).bind(passportId).first();
+  if (result) await auditSecurityEvent(env, "nfc_card_removed", passportId, "/api/admin/nfc/remove", "completed", { uid: result.uid });
   return json({ status: result ? "removed" : "not_assigned", uid: result?.uid || null }, 200, cors);
 }
 
@@ -1863,6 +2197,7 @@ async function updateSocialCheckin(body, env, cors) {
     SET social_checkin_visible = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin'
     WHERE id = 1
   `).bind(visible).run();
+  await auditSecurityEvent(env, "social_checkin_visibility_changed", null, "/api/admin/social-checkin/update", "completed", { visible: Boolean(visible) });
   return json({ visible: Boolean(visible) }, 200, cors);
 }
 
@@ -1878,6 +2213,7 @@ async function updateSignalsVisibility(body, env, cors) {
     UPDATE invitation_settings SET signals_visible = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin'
     WHERE id = 1
   `).bind(visible).run();
+  await auditSecurityEvent(env, "signals_visibility_changed", null, "/api/admin/signals/visibility/update", "completed", { visible: Boolean(visible) });
   return json({ visible: Boolean(visible) }, 200, cors);
 }
 
@@ -2166,32 +2502,49 @@ async function updateInvitation(body, env, cors) {
       updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin'
     WHERE id = 1
   `).bind(kicker, title, description, buttonLabel, buttonUrl).run();
+  await auditSecurityEvent(env, "invitation_content_updated", null, "/api/admin/invitation/update", "completed", { title, buttonVisible: Boolean(buttonLabel) });
   return await getAdminInvitation(env, cors);
 }
 
 async function buildTechniqueLab(passportId, env, includeInstructorGuidance) {
-  const [settings, result] = await Promise.all([
+  const [settings, result, targets, suggestions, preference, history] = await Promise.all([
     env.DB.prepare(`SELECT checks_available, availability_window FROM technique_settings WHERE id = 1`).first(),
     env.DB.prepare(`
       SELECT tc.code, tc.name, tc.member_description, tc.instructor_criteria, tc.feedback_options,
+        tc.category, tc.role_applicability, tc.target_eligible, tc.evaluation_eligible, tc.overlap_eligible, tc.micro_guidance,
         tr.status AS request_status, tr.requested_at,
         latest.result AS latest_result, latest.feedback_tags, latest.instructor_note,
         latest.instructor_name, latest.checked_at,
-        (SELECT COUNT(*) FROM technique_checks history WHERE history.passport_id = ? AND history.competency_id = tc.id) AS check_count
+        (SELECT COUNT(*) FROM technique_checks history WHERE history.passport_id = ? AND history.competency_id = tc.id
+          AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'technique_check' AND ac.target_id = history.id AND ac.affects_effective_state = 1)) AS check_count
       FROM technique_competencies tc
       LEFT JOIN technique_requests tr ON tr.passport_id = ? AND tr.competency_id = tc.id
       LEFT JOIN technique_checks latest ON latest.id = (
         SELECT recent.id FROM technique_checks recent
         WHERE recent.passport_id = ? AND recent.competency_id = tc.id
+          AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'technique_check' AND ac.target_id = recent.id AND ac.affects_effective_state = 1)
         ORDER BY recent.checked_at DESC, recent.id DESC LIMIT 1
       )
-      WHERE tc.active = 1 ORDER BY tc.sort_order, tc.id
-    `).bind(passportId, passportId, passportId).all()
+      WHERE tc.active = 1 ORDER BY tc.category, tc.sort_order, tc.id
+    `).bind(passportId, passportId, passportId).all(),
+    env.DB.prepare(`SELECT mt.id, mt.status, mt.available_to_help, mt.added_at, tc.code, tc.name, tc.member_description, tc.category, tc.role_applicability, tc.micro_guidance
+      FROM member_targets mt JOIN technique_competencies tc ON tc.id = mt.skill_id
+      WHERE mt.passport_id = ? AND mt.active = 1 ORDER BY mt.added_at, mt.id`).bind(passportId).all(),
+    env.DB.prepare(`SELECT ts.id, ts.created_at, tc.code, tc.name, tc.member_description FROM target_suggestions ts
+      JOIN technique_competencies tc ON tc.id = ts.skill_id WHERE ts.passport_id = ? AND ts.status = 'pending' ORDER BY ts.created_at DESC`).bind(passportId).all(),
+    env.DB.prepare(`SELECT preferred_role FROM overlap_preferences WHERE passport_id = ?`).bind(passportId).first(),
+    env.DB.prepare(`SELECT th.action, th.detail, th.created_at, tc.name FROM target_history th JOIN technique_competencies tc ON tc.id = th.skill_id
+      WHERE th.passport_id = ? ORDER BY th.created_at DESC LIMIT 30`).bind(passportId).all()
   ]);
 
   return {
     checksAvailable: Boolean(settings?.checks_available),
     availabilityWindow: settings?.availability_window || null,
+    openToOverlap: Boolean(preference?.open_to_overlap),
+    preferredRole: preference?.preferred_role || null,
+    currentTargets: (targets.results || []).map((target) => ({ id: Number(target.id), code: target.code, name: target.name, description: target.member_description, category: target.category, role: target.role_applicability, status: target.status, availableToHelp: Boolean(target.available_to_help), addedAt: target.added_at, guidance: parseJsonArray(target.micro_guidance) })),
+    suggestions: (suggestions.results || []).map((suggestion) => ({ id: suggestion.id, code: suggestion.code, name: suggestion.name, description: suggestion.member_description, suggestedAt: suggestion.created_at })),
+    targetHistory: (history.results || []).map((entry) => ({ skillName: entry.name, action: entry.action, detail: entry.detail, createdAt: entry.created_at })),
     competencies: (result.results || []).map((competency) => {
       const latestResult = competency.latest_result || null;
       const state = latestResult === "verified"
@@ -2201,6 +2554,12 @@ async function buildTechniqueLab(passportId, env, includeInstructorGuidance) {
         code: competency.code,
         name: competency.name,
         description: competency.member_description,
+        category: competency.category,
+        role: competency.role_applicability,
+        targetEligible: Boolean(competency.target_eligible),
+        evaluationEligible: Boolean(competency.evaluation_eligible),
+        overlapEligible: Boolean(competency.overlap_eligible),
+        guidance: parseJsonArray(competency.micro_guidance),
         state,
         requestActive: competency.request_status === "active",
         requestedAt: competency.requested_at || null,
@@ -2225,6 +2584,8 @@ async function requestTechniqueCheck(body, env, cors) {
   const passport = await getPassportByHash(await sha256(cardId), env);
   if (!passport || passport.disabled_at) throw new HttpError(404, "Card not recognized.");
   if (passport.status !== "claimed") throw new HttpError(403, "Enter the Underground before using Technique Lab.");
+  const settings = await env.DB.prepare(`SELECT checks_available FROM technique_settings WHERE id = 1`).first();
+  if (!settings?.checks_available) throw new HttpError(403, "Technique feedback is not available right now.");
   const competencyCode = String(body.competencyCode || "").trim().toLowerCase();
   const competency = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ? AND active = 1`).bind(competencyCode).first();
   if (!competency) throw new HttpError(404, "Technique competency not found.");
@@ -2286,7 +2647,9 @@ async function recordTechniqueCheck(body, env, cors, authorizedInstructor = null
   if (feedbackTags.some((tag) => !allowedFeedback.has(tag))) throw new HttpError(400, "Choose valid feedback guidance.");
   if (result === "verified" && feedbackTags.length) throw new HttpError(400, "Feedback tags are only used with Keep Working.");
   const previousKeepWorking = result === "verified" ? await env.DB.prepare(`
-    SELECT id FROM technique_checks WHERE passport_id = ? AND competency_id = ? AND result = 'keep_working' LIMIT 1
+    SELECT id FROM technique_checks WHERE passport_id = ? AND competency_id = ? AND result = 'keep_working'
+      AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'technique_check' AND ac.target_id = technique_checks.id AND ac.affects_effective_state = 1)
+    LIMIT 1
   `).bind(passport.passport_id, competency.id).first() : null;
   const checkId = `technique_${crypto.randomUUID()}`;
   const statements = [
@@ -2308,6 +2671,9 @@ async function recordTechniqueCheck(body, env, cors, authorizedInstructor = null
     `).bind(passport.passport_id));
   }
   await env.DB.batch(statements);
+  await auditSecurityEvent(env, "technique_evaluation_recorded", authorizedInstructor?.passport_id || null,
+    authorizedInstructor ? "/api/instructor/technique/check" : "/api/admin/technique/check", "completed",
+    { checkId, memberPassportId: Number(passport.passport_id), competencyCode, result, createdBy });
   return json({
     status: "recorded",
     checkId,
@@ -2331,6 +2697,7 @@ async function updateTechniqueSettings(body, env, cors) {
   await env.DB.prepare(`
     UPDATE technique_settings SET checks_available = ?, availability_window = ?, updated_at = CURRENT_TIMESTAMP, updated_by = 'inner-circle-admin' WHERE id = 1
   `).bind(checksAvailable, availabilityWindow).run();
+  await auditSecurityEvent(env, "technique_availability_changed", null, "/api/admin/technique/settings/update", "completed", { checksAvailable: Boolean(checksAvailable), availabilityWindow });
   return await getAdminTechniqueSettings(env, cors);
 }
 
@@ -2340,9 +2707,12 @@ async function getPassportById(rawPassportId, env) {
     SELECT p.id AS passport_id, p.member_name, p.activation_date, p.status, c.card_number, p.pin_hash IS NOT NULL AS pin_configured,
       EXISTS(SELECT 1 FROM pin_reset_requests prr WHERE prr.passport_id = p.id AND prr.status = 'pending') AS pin_reset_requested,
       EXISTS (SELECT 1 FROM passport_roles pr WHERE pr.passport_id = p.id AND pr.role = 'instructor') AS is_instructor,
-      (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id) AS attendance_count,
-      (SELECT COUNT(*) FROM stamps s WHERE s.passport_id = p.id) AS stamp_count,
-      (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id) AS mission_count,
+      (SELECT COUNT(*) FROM event_attendance ea WHERE ea.passport_id = p.id AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND ac.target_id = CAST(ea.id AS TEXT) AND ac.affects_effective_state = 1
+      )) AS attendance_count,
+      (SELECT COUNT(DISTINCT mc.mission_id) FROM mission_completions mc WHERE mc.passport_id = p.id AND NOT EXISTS (
+        SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mc.id AND ac.affects_effective_state = 1
+      )) AS mission_count,
       (SELECT COALESCE(SUM(kt.amount), 0) FROM key_transactions kt WHERE kt.passport_id = p.id) AS key_balance
     FROM passports p JOIN cards c ON c.id = p.card_id
     WHERE p.id = ? AND p.status = 'claimed' AND c.disabled_at IS NULL LIMIT 1
@@ -2498,6 +2868,7 @@ async function updateMembershipRequest(body, env, cors) {
   } else {
     throw new HttpError(400, "Request type is invalid.");
   }
+  await auditSecurityEvent(env, "membership_request_updated", null, "/api/admin/membership/update", "completed", { requestType, requestId, status: body.status, assignedCardId: body.assignedCardId || null });
   return await listMembershipRequests(env, cors);
 }
 
@@ -2530,6 +2901,9 @@ async function enforceRateLimit(request, env, explicitScope = null, explicitLimi
   const limit = explicitLimit || policy.limit;
   const windowMs = explicitWindowMs || policy.windowMs;
   const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+  if (crypto.getRandomValues(new Uint8Array(1))[0] < 8) {
+    await env.DB.prepare(`DELETE FROM rate_limits WHERE window_start < ?`).bind(Date.now() - 24 * 60 * 60 * 1000).run();
+  }
   const rateKey = await sha256(`${env.RATE_LIMIT_SECRET}:${ipAddress}:${scope}:${windowStart}`);
   const result = await env.DB.prepare(`
     INSERT INTO rate_limits (rate_key, window_start, attempts) VALUES (?, ?, 1)
@@ -2545,6 +2919,7 @@ function getRateLimitPolicy(path) {
   if (path === "/api/card/pin/unlock") return { scope: "pin-unlock", limit: 20, windowMs: 10 * 60 * 1000 };
   if (["/api/card/lookup", "/api/card/claim", "/api/card/pin/setup", "/api/card/pin/reset-request"].includes(path)) return { scope: "card-access", limit: 40, windowMs: 10 * 60 * 1000 };
   if (["/api/missions/claim", "/api/events/check-in", "/api/milestones/claim", "/api/workshop/complete", "/api/signals/recipient"].includes(path)) return { scope: `code:${path}`, limit: 35, windowMs: 10 * 60 * 1000 };
+  if (path === "/api/classifieds/report") return { scope: "classifieds-report", limit: 15, windowMs: 10 * 60 * 1000 };
   if (path.startsWith("/api/classifieds/")) return { scope: "classifieds", limit: 80, windowMs: 10 * 60 * 1000 };
   return { scope: "member-actions", limit: 150, windowMs: RATE_LIMIT_WINDOW_MS };
 }
@@ -2570,6 +2945,12 @@ function normalizeMemberName(value) {
   const memberName = String(value || "").trim().replace(/\s+/g, " ");
   if (memberName.length < 2 || memberName.length > 80) throw new HttpError(400, "Enter a name between 2 and 80 characters.");
   return memberName;
+}
+
+function rejectDirectContactDetails(value) {
+  const text = String(value || "");
+  const containsContact = /https?:\/\/|www\.|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|@\w{2,}|\+?\d[\d\s().-]{6,}\d/i.test(text);
+  if (containsContact) throw new HttpError(400, "Keep phone numbers, email addresses, links, and social handles out of Classifieds. Use the private contact-sharing option instead.");
 }
 
 function normalizePositiveInteger(value, label) {
@@ -2603,7 +2984,9 @@ async function enforceMissionCooldown(passportId, mission, env) {
   if (!mission.repeatable || cooldownHours < 1) return;
   const latest = await env.DB.prepare(`
     SELECT verified_at FROM mission_completions
-    WHERE passport_id = ? AND mission_id = ? ORDER BY verified_at DESC, rowid DESC LIMIT 1
+    WHERE passport_id = ? AND mission_id = ? AND NOT EXISTS (
+      SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'mission_completion' AND ac.target_id = mission_completions.id AND ac.affects_effective_state = 1
+    ) ORDER BY verified_at DESC, rowid DESC LIMIT 1
   `).bind(passportId, mission.id).first();
   const nextAvailableAt = getMissionNextAvailableAt(latest?.verified_at, cooldownHours);
   if (nextAvailableAt) throw new HttpError(409, `This mission is available again ${formatCooldownDate(nextAvailableAt)}.`);
@@ -2681,6 +3064,272 @@ function normalizeEventDate(value) {
   if (!text || Number.isNaN(date.getTime())) throw new HttpError(400, "Enter a valid event date and time.");
   return date.toISOString();
 }
+
+async function updateMemberTarget(body, passport, env, cors) {
+  const code = normalizeShortCode(body.skillCode, "skill");
+  const action = String(body.action || "");
+  const skill = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ? AND active = 1 AND target_eligible = 1`).bind(code).first();
+  if (!skill) throw new HttpError(404, "That skill is not available as a Target.");
+  const existing = await env.DB.prepare(`SELECT id, status, available_to_help FROM member_targets WHERE passport_id = ? AND skill_id = ? AND active = 1`).bind(passport.passport_id, skill.id).first();
+  if (action === "add") {
+    if (!existing) {
+      const count = await env.DB.prepare(`SELECT COUNT(*) count FROM member_targets WHERE passport_id = ? AND active = 1`).bind(passport.passport_id).first();
+      if (Number(count?.count || 0) >= 3) throw new HttpError(409, "You may have up to three Current Targets.");
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO member_targets (passport_id, skill_id) VALUES (?, ?)`).bind(passport.passport_id, skill.id),
+        env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action) VALUES (?, ?, 'added')`).bind(passport.passport_id, skill.id)
+      ]);
+    }
+  } else if (action === "status") {
+    if (!existing) throw new HttpError(404, "That skill is not a Current Target.");
+    const status = String(body.status || "");
+    if (!["learning", "working", "comfortable"].includes(status)) throw new HttpError(400, "Choose a valid Target status.");
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE member_targets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(status, existing.id),
+      env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action, detail) VALUES (?, ?, 'status_changed', ?)`).bind(passport.passport_id, skill.id, status)
+    ]);
+  } else if (action === "help") {
+    if (!existing) throw new HttpError(404, "That skill is not a Current Target.");
+    const enabled = Boolean(body.enabled);
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE member_targets SET available_to_help = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(enabled ? 1 : 0, existing.id),
+      env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action) VALUES (?, ?, ?)`).bind(passport.passport_id, skill.id, enabled ? "help_opt_in" : "help_opt_out")
+    ]);
+  } else if (action === "clear") {
+    if (existing) await env.DB.batch([
+      env.DB.prepare(`UPDATE member_targets SET active = 0, available_to_help = 0, cleared_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(existing.id),
+      env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action) VALUES (?, ?, 'cleared')`).bind(passport.passport_id, skill.id)
+    ]);
+  } else throw new HttpError(400, "Choose a valid Target action.");
+  const refreshed = await getPassportById(passport.passport_id, env);
+  return json({ status: "updated", techniqueLab: await buildTechniqueLab(passport.passport_id, env, false), passport: await buildPublicPassport(refreshed, env) }, 200, cors);
+}
+
+async function updateOverlapPreference(body, passport, env, cors) {
+  const preferredRole = ["lead", "follow"].includes(body.preferredRole) ? body.preferredRole : null;
+  await env.DB.prepare(`INSERT INTO overlap_preferences (passport_id, open_to_overlap, preferred_role, updated_at) VALUES (?, 1, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(passport_id) DO UPDATE SET open_to_overlap = 1, preferred_role = excluded.preferred_role, updated_at = CURRENT_TIMESTAMP`).bind(passport.passport_id, preferredRole).run();
+  return json({ status: "updated", openToOverlap: true, preferredRole }, 200, cors);
+}
+
+async function respondTargetSuggestion(body, passport, env, cors) {
+  const action = body.action === "accept" ? "accepted" : body.action === "decline" ? "declined" : null;
+  if (!action) throw new HttpError(400, "Choose accept or decline.");
+  const suggestion = await env.DB.prepare(`SELECT ts.*, tc.code FROM target_suggestions ts JOIN technique_competencies tc ON tc.id = ts.skill_id WHERE ts.id = ? AND ts.passport_id = ? AND ts.status = 'pending'`).bind(String(body.suggestionId || ""), passport.passport_id).first();
+  if (!suggestion) throw new HttpError(404, "That Lab Note is no longer available.");
+  if (action === "accepted") {
+    const count = await env.DB.prepare(`SELECT COUNT(*) count FROM member_targets WHERE passport_id = ? AND active = 1`).bind(passport.passport_id).first();
+    if (Number(count?.count || 0) >= 3) throw new HttpError(409, "Clear a Current Target before accepting this Lab Note.");
+    await env.DB.prepare(`INSERT OR IGNORE INTO member_targets (passport_id, skill_id) VALUES (?, ?)`).bind(passport.passport_id, suggestion.skill_id).run();
+  }
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE target_suggestions SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(action, suggestion.id),
+    env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action, created_by) VALUES (?, ?, ?, 'member')`).bind(passport.passport_id, suggestion.skill_id, action === "accepted" ? "suggestion_accepted" : "suggestion_declined")
+  ]);
+  return json({ status: action, techniqueLab: await buildTechniqueLab(passport.passport_id, env, false) }, 200, cors);
+}
+
+async function respondOverlap(body, passport, env, cors) {
+  const status = body.action === "accept" ? "accepted" : "declined";
+  const result = await env.DB.prepare(`UPDATE overlap_invitations SET status = ? WHERE id = ? AND status = 'active' AND (first_passport_id = ? OR second_passport_id = ?) RETURNING id`).bind(status, String(body.overlapId || ""), passport.passport_id, passport.passport_id).first();
+  if (!result) throw new HttpError(404, "That Overlap is no longer active.");
+  return json({ status }, 200, cors);
+}
+
+async function buildMemberCommandLayer(passport, env) {
+  const [transmissions, drops, overlaps] = await Promise.all([
+    env.DB.prepare(`SELECT mt.id, mt.message_type, mt.message, mt.expires_at FROM manual_transmissions mt JOIN manual_transmission_recipients mr ON mr.transmission_id = mt.id WHERE mr.passport_id = ? AND mr.dismissed_at IS NULL AND mt.expires_at > CURRENT_TIMESTAMP ORDER BY mt.created_at DESC`).bind(passport.passport_id).all(),
+    env.DB.prepare(`SELECT dd.id, dd.title, dd.body, dd.action_type, dd.action_value, dd.expires_at FROM dead_drops dd WHERE dd.active = 1 AND dd.starts_at <= CURRENT_TIMESTAMP AND dd.expires_at > CURRENT_TIMESTAMP
+      AND NOT EXISTS (SELECT 1 FROM dead_drop_claims claim WHERE claim.dead_drop_id = dd.id AND claim.passport_id = ?)
+      AND (dd.max_claims IS NULL OR dd.max_claims > (SELECT COUNT(*) FROM dead_drop_claims count_claim WHERE count_claim.dead_drop_id = dd.id))
+      AND (dd.eligibility_type = 'all' OR (dd.eligibility_type = 'member' AND dd.eligibility_value = CAST(? AS TEXT)) OR (dd.eligibility_type = 'level' AND dd.eligibility_value = ?)
+        OR (dd.eligibility_type = 'event' AND EXISTS (SELECT 1 FROM event_attendance ea WHERE ea.passport_id = ? AND ea.event_id = CAST(dd.eligibility_value AS INTEGER))))`).bind(passport.passport_id, passport.passport_id, getUndergroundLevel(Number(passport.mission_count || 0)), passport.passport_id).all(),
+    env.DB.prepare(`SELECT oi.id, oi.status, oi.expires_at, first_skill.name first_skill, second_skill.name second_skill,
+      CASE WHEN oi.first_passport_id = ? THEN second_card.card_number ELSE first_card.card_number END partner_card
+      FROM overlap_invitations oi JOIN technique_competencies first_skill ON first_skill.id = oi.first_skill_id JOIN technique_competencies second_skill ON second_skill.id = oi.second_skill_id
+      JOIN passports first_member ON first_member.id = oi.first_passport_id JOIN cards first_card ON first_card.id = first_member.card_id
+      JOIN passports second_member ON second_member.id = oi.second_passport_id JOIN cards second_card ON second_card.id = second_member.card_id
+      WHERE (oi.first_passport_id = ? OR oi.second_passport_id = ?) AND oi.status = 'active' AND (oi.expires_at IS NULL OR oi.expires_at > CURRENT_TIMESTAMP)`).bind(passport.passport_id, passport.passport_id, passport.passport_id).all()
+  ]);
+  return { transmissions: transmissions.results || [], deadDrops: drops.results || [], overlaps: (overlaps.results || []).map((item) => ({ id: item.id, partnerCard: item.partner_card, firstSkill: item.first_skill, secondSkill: item.second_skill, status: item.status, expiresAt: item.expires_at })) };
+}
+
+async function dismissTransmission(body, passport, env, cors) {
+  await env.DB.prepare(`UPDATE manual_transmission_recipients SET dismissed_at = CURRENT_TIMESTAMP WHERE transmission_id = ? AND passport_id = ?`).bind(String(body.transmissionId || ""), passport.passport_id).run();
+  return json({ status: "dismissed" }, 200, cors);
+}
+
+async function claimDeadDrop(body, passport, env, cors) {
+  const id = String(body.deadDropId || "");
+  const drop = await env.DB.prepare(`SELECT * FROM dead_drops WHERE id = ? AND active = 1 AND starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP`).bind(id).first();
+  if (!drop) throw new HttpError(404, "This Dead Drop is no longer active.");
+  const eligible = drop.eligibility_type === "all" || (drop.eligibility_type === "member" && String(drop.eligibility_value) === String(passport.passport_id)) || (drop.eligibility_type === "level" && drop.eligibility_value === getUndergroundLevel(Number(passport.mission_count || 0))) || (drop.eligibility_type === "event" && await env.DB.prepare(`SELECT 1 ok FROM event_attendance WHERE passport_id = ? AND event_id = ?`).bind(passport.passport_id, Number(drop.eligibility_value)).first());
+  if (!eligible) throw new HttpError(403, "This Dead Drop is not available.");
+  if (drop.max_claims != null) { const count = await env.DB.prepare(`SELECT COUNT(*) count FROM dead_drop_claims WHERE dead_drop_id = ?`).bind(id).first(); if (Number(count?.count || 0) >= Number(drop.max_claims)) throw new HttpError(409, "This Dead Drop is empty."); }
+  await env.DB.prepare(`INSERT OR IGNORE INTO dead_drop_claims (dead_drop_id, passport_id) VALUES (?, ?)`).bind(id, passport.passport_id).run();
+  return json({ status: "claimed", actionType: drop.action_type, actionValue: drop.action_value || null }, 200, cors);
+}
+
+async function listSkillCatalog(env, cors) {
+  const [skills, links] = await Promise.all([env.DB.prepare(`SELECT * FROM technique_competencies ORDER BY active DESC, category, sort_order, id`).all(), env.DB.prepare(`SELECT skill_id, complementary_skill_id FROM technique_complementarity`).all()]);
+  return json({ skills: skills.results || [], complementarity: links.results || [] }, 200, cors);
+}
+
+async function listTargetMembers(body, env, cors) {
+  const code = normalizeShortCode(body.skillCode, "skill");
+  const skill = await env.DB.prepare(`SELECT id, code, name FROM technique_competencies WHERE code = ? AND active = 1 AND target_eligible = 1`).bind(code).first();
+  if (!skill) throw new HttpError(404, "Target not found.");
+  const members = await env.DB.prepare(`SELECT p.id passport_id, p.member_name, c.card_number, mt.status, mt.added_at
+    FROM member_targets mt JOIN passports p ON p.id = mt.passport_id JOIN cards c ON c.id = p.card_id
+    WHERE mt.skill_id = ? AND mt.active = 1 AND p.status = 'active'
+    ORDER BY p.member_name COLLATE NOCASE, c.card_number`).bind(skill.id).all();
+  return json({ skill: { id: Number(skill.id), code: skill.code, name: skill.name }, members: members.results || [] }, 200, cors);
+}
+
+async function saveSkill(body, env, cors) {
+  const name = normalizeText(body.name, 2, 100, "skill name"); const description = normalizeText(body.description, 2, 500, "description");
+  const code = body.code ? normalizeShortCode(body.code, "skill") : name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  const role = ["lead", "follow", "either"].includes(body.role) ? body.role : "either";
+  const guidance = normalizeStringArray(body.guidance, 5, 180);
+  await env.DB.prepare(`INSERT INTO technique_competencies (code, name, member_description, instructor_criteria, feedback_options, category, role_applicability, target_eligible, evaluation_eligible, overlap_eligible, micro_guidance, active, sort_order)
+    VALUES (?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO UPDATE SET name=excluded.name, member_description=excluded.member_description, instructor_criteria=excluded.instructor_criteria, category=excluded.category, role_applicability=excluded.role_applicability, target_eligible=excluded.target_eligible, evaluation_eligible=excluded.evaluation_eligible, overlap_eligible=excluded.overlap_eligible, micro_guidance=excluded.micro_guidance, active=excluded.active, sort_order=excluded.sort_order, updated_at=CURRENT_TIMESTAMP`).bind(code, name, description, String(body.instructorCriteria || description).slice(0, 1000), String(body.category || "Foundations").slice(0, 80), role, body.targetEligible === false ? 0 : 1, body.evaluationEligible === false ? 0 : 1, body.overlapEligible === false ? 0 : 1, JSON.stringify(guidance), body.active === false ? 0 : 1, Number(body.sortOrder || 0)).run();
+  return await listSkillCatalog(env, cors);
+}
+
+async function saveComplementarity(body, env, cors) {
+  const first = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ?`).bind(normalizeShortCode(body.firstCode, "skill")).first();
+  const second = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ?`).bind(normalizeShortCode(body.secondCode, "skill")).first();
+  if (!first || !second || first.id === second.id) throw new HttpError(400, "Choose two different valid skills.");
+  await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO technique_complementarity VALUES (?, ?, CURRENT_TIMESTAMP)`).bind(first.id, second.id), env.DB.prepare(`INSERT OR IGNORE INTO technique_complementarity VALUES (?, ?, CURRENT_TIMESTAMP)`).bind(second.id, first.id)]);
+  return json({ status: "saved" }, 200, cors);
+}
+
+async function suggestTarget(body, env, cors) {
+  const skill = await env.DB.prepare(`SELECT id FROM technique_competencies WHERE code = ? AND active = 1 AND target_eligible = 1`).bind(normalizeShortCode(body.skillCode, "skill")).first();
+  if (!skill) throw new HttpError(404, "Skill not found.");
+  const id = `suggestion_${crypto.randomUUID()}`;
+  await env.DB.batch([env.DB.prepare(`INSERT INTO target_suggestions (id, passport_id, skill_id, suggested_by) VALUES (?, ?, ?, ?)`).bind(id, Number(body.passportId), skill.id, normalizeText(body.suggestedBy || "JustBaila instructor", 2, 80, "instructor name")), env.DB.prepare(`INSERT INTO target_history (passport_id, skill_id, action, created_by) VALUES (?, ?, 'suggested', 'mission-desk-admin')`).bind(Number(body.passportId), skill.id)]);
+  return json({ status: "suggested", id }, 201, cors);
+}
+
+async function buildOverlapRadar(body, env, cors) {
+  const eventId = Number(body.eventId || 0);
+  if (!Number.isInteger(eventId) || eventId < 1) return json({ matches: [] }, 200, cors);
+  const rows = await env.DB.prepare(`SELECT a.passport_id first_passport_id, b.passport_id second_passport_id, a.skill_id first_skill_id, b.skill_id second_skill_id,
+    sa.name first_skill, sb.name second_skill, ca.card_number first_card, cb.card_number second_card,
+    CASE WHEN a.skill_id = b.skill_id THEN 'exact' ELSE 'complementary' END match_type
+    FROM member_targets a JOIN member_targets b ON a.passport_id < b.passport_id AND b.active = 1
+    JOIN technique_competencies sa ON sa.id = a.skill_id AND sa.active = 1 AND sa.overlap_eligible = 1
+    JOIN technique_competencies sb ON sb.id = b.skill_id AND sb.active = 1 AND sb.overlap_eligible = 1
+    JOIN event_attendance ea ON ea.passport_id = a.passport_id AND ea.event_id = ?
+    JOIN event_attendance eb ON eb.passport_id = b.passport_id AND eb.event_id = ?
+    JOIN passports pa ON pa.id = a.passport_id JOIN cards ca ON ca.id = pa.card_id JOIN passports pb ON pb.id = b.passport_id JOIN cards cb ON cb.id = pb.card_id
+    WHERE a.active = 1 AND (a.skill_id = b.skill_id OR EXISTS (SELECT 1 FROM technique_complementarity tc WHERE tc.skill_id = a.skill_id AND tc.complementary_skill_id = b.skill_id))
+      AND (sa.role_applicability = 'either' OR sb.role_applicability = 'either' OR sa.role_applicability != sb.role_applicability)
+      AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type = 'event_attendance' AND (ac.target_id = CAST(ea.id AS TEXT) OR ac.target_id = CAST(eb.id AS TEXT)) AND ac.affects_effective_state = 1)
+    ORDER BY ca.card_number, cb.card_number, sa.sort_order`).bind(eventId, eventId).all();
+  return json({ matches: rows.results || [] }, 200, cors);
+}
+
+async function activateOverlap(body, env, cors) {
+  const firstPassportId = Number(body.firstPassportId), secondPassportId = Number(body.secondPassportId), firstSkillId = Number(body.firstSkillId), secondSkillId = Number(body.secondSkillId);
+  if (![firstPassportId, secondPassportId, firstSkillId, secondSkillId].every(Number.isInteger) || firstPassportId === secondPassportId) throw new HttpError(400, "Choose two valid members and Targets.");
+  const eligibility = await env.DB.prepare(`SELECT COUNT(*) count FROM member_targets WHERE active = 1 AND ((passport_id = ? AND skill_id = ?) OR (passport_id = ? AND skill_id = ?))`).bind(firstPassportId, firstSkillId, secondPassportId, secondSkillId).first();
+  if (Number(eligibility?.count || 0) !== 2) throw new HttpError(409, "Both members must still have these active Targets.");
+  const existing = await env.DB.prepare(`SELECT id FROM overlap_invitations WHERE status = 'active' AND expires_at > CURRENT_TIMESTAMP AND ((first_passport_id = ? AND second_passport_id = ?) OR (first_passport_id = ? AND second_passport_id = ?)) AND first_skill_id = ? AND second_skill_id = ? LIMIT 1`).bind(firstPassportId, secondPassportId, secondPassportId, firstPassportId, firstSkillId, secondSkillId).first();
+  if (existing) throw new HttpError(409, "That Overlap is already active.");
+  const eventId = Number.isInteger(Number(body.eventId)) && Number(body.eventId) > 0 ? Number(body.eventId) : null;
+  const id = `overlap_${crypto.randomUUID()}`; const expiresAt = new Date(Date.now() + (eventId ? 4 : 24) * 60 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO overlap_invitations (id, event_id, first_passport_id, second_passport_id, first_skill_id, second_skill_id, match_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, eventId, firstPassportId, secondPassportId, firstSkillId, secondSkillId, body.matchType === "exact" ? "exact" : "complementary", expiresAt).run();
+  return json({ status: "activated", id }, 201, cors);
+}
+
+async function saveWatchlist(body, env, cors) {
+  const passportId = Number(body.passportId); if (body.watched === false) await env.DB.prepare(`DELETE FROM admin_watchlist WHERE passport_id = ?`).bind(passportId).run();
+  else await env.DB.prepare(`INSERT INTO admin_watchlist (passport_id, note) VALUES (?, ?) ON CONFLICT(passport_id) DO UPDATE SET note=excluded.note, watched_at=CURRENT_TIMESTAMP`).bind(passportId, String(body.note || "").slice(0, 500)).run();
+  return json({ status: body.watched === false ? "removed" : "watched" }, 200, cors);
+}
+
+async function saveMemberNote(body, env, cors) {
+  const note = normalizeText(body.note, 1, 1000, "note"); const id = body.id ? String(body.id) : `note_${crypto.randomUUID()}`;
+  await env.DB.prepare(`INSERT INTO member_admin_notes (id, passport_id, note) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET note=excluded.note, updated_at=CURRENT_TIMESTAMP`).bind(id, Number(body.passportId), note).run();
+  return json({ status: "saved", id }, 200, cors);
+}
+
+async function getMemberOperations(body, env, cors) {
+  const passportId = Number(body.passportId); const [watch, notes, lab] = await Promise.all([env.DB.prepare(`SELECT * FROM admin_watchlist WHERE passport_id = ?`).bind(passportId).first(), env.DB.prepare(`SELECT * FROM member_admin_notes WHERE passport_id = ? ORDER BY created_at DESC`).bind(passportId).all(), buildTechniqueLab(passportId, env, true)]);
+  return json({ watched: Boolean(watch), watchNote: watch?.note || "", notes: notes.results || [], techniqueLab: lab }, 200, cors);
+}
+
+async function sendManualTransmission(body, env, cors) {
+  const message = normalizeText(body.message, 1, 180, "message"); const scope = ["member", "selected", "event"].includes(body.scopeType) ? body.scopeType : "member"; const id = `transmission_${crypto.randomUUID()}`; const expiresAt = new Date(Date.now() + Math.min(Math.max(Number(body.durationHours || 4), 1), 72) * 3600000).toISOString();
+  let recipients = [];
+  if (scope === "event") recipients = (await env.DB.prepare(`SELECT DISTINCT passport_id FROM event_attendance WHERE event_id = ?`).bind(Number(body.eventId)).all()).results || [];
+  else recipients = [...new Set((scope === "selected" ? body.passportIds : [body.passportId]).map(Number).filter((value) => Number.isInteger(value) && value > 0))].map((passport_id) => ({ passport_id }));
+  if (!recipients.length || recipients.length > 200) throw new HttpError(400, "Choose between 1 and 200 recipients.");
+  await env.DB.prepare(`INSERT INTO manual_transmissions (id, message_type, message, scope_type, event_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(id, String(body.messageType || "signal").slice(0, 40), message, scope, body.eventId ? Number(body.eventId) : null, expiresAt).run();
+  await env.DB.batch(recipients.map((recipient) => env.DB.prepare(`INSERT INTO manual_transmission_recipients (transmission_id, passport_id) VALUES (?, ?)`).bind(id, recipient.passport_id)));
+  return json({ status: "sent", id, recipientCount: recipients.length, expiresAt }, 201, cors);
+}
+
+async function saveDeadDrop(body, env, cors) {
+  const id = body.id ? String(body.id) : `drop_${crypto.randomUUID()}`; const startsAt = normalizeEventDate(body.startsAt); const expiresAt = normalizeEventDate(body.expiresAt); if (expiresAt <= startsAt) throw new HttpError(400, "Expiration must be after the start.");
+  const eligibility = ["all", "member", "event", "level"].includes(body.eligibilityType) ? body.eligibilityType : "all"; const action = ["none", "url", "assignment_hook"].includes(body.actionType) ? body.actionType : "none";
+  await env.DB.prepare(`INSERT INTO dead_drops (id, title, body, action_type, action_value, eligibility_type, eligibility_value, starts_at, expires_at, max_claims, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET title=excluded.title, body=excluded.body, action_type=excluded.action_type, action_value=excluded.action_value, eligibility_type=excluded.eligibility_type, eligibility_value=excluded.eligibility_value, starts_at=excluded.starts_at, expires_at=excluded.expires_at, max_claims=excluded.max_claims, active=excluded.active`).bind(id, normalizeText(body.title, 1, 100, "title"), normalizeText(body.body, 1, 1000, "content"), action, String(body.actionValue || "").slice(0, 500) || null, eligibility, String(body.eligibilityValue || "").slice(0, 100) || null, startsAt, expiresAt, body.maxClaims ? Number(body.maxClaims) : null, body.active === false ? 0 : 1).run();
+  return json({ status: "saved", id }, 200, cors);
+}
+
+async function configureGhostMission(body, env, cors) {
+  const allowed = ["none", "level", "milestone", "event_count", "target", "mission", "private_assignment", "signal_history", "operator"]; const trigger = allowed.includes(body.triggerType) ? body.triggerType : "none";
+  await env.DB.prepare(`UPDATE missions SET visibility_mode = ?, trigger_type = ?, trigger_value = ?, operator_active = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?`).bind(body.ghost ? "ghost" : "normal", trigger, String(body.triggerValue || "").slice(0, 100) || null, body.operatorActive ? 1 : 0, normalizeShortCode(body.missionCode, "mission")).run();
+  return json({ status: "configured" }, 200, cors);
+}
+
+async function isGhostMissionEligible(mission, passport, env) {
+  const type = mission.trigger_type; const value = String(mission.trigger_value || "");
+  if (type === "operator") return Boolean(mission.operator_active);
+  if (type === "level") return getUndergroundLevel(Number(passport.mission_count || 0)) === value.toUpperCase();
+  if (type === "event_count") return Number(passport.attendance_count || 0) >= Number(value || 0);
+  if (type === "private_assignment") return mission.scope === "individual" && Boolean(mission.assignment_status);
+  if (type === "milestone") return Boolean(await env.DB.prepare(`SELECT 1 ok FROM passport_milestones pm JOIN milestones m ON m.id=pm.milestone_id WHERE pm.passport_id=? AND m.code=?`).bind(passport.passport_id, value).first());
+  if (type === "target") return Boolean(await env.DB.prepare(`SELECT 1 ok FROM member_targets mt JOIN technique_competencies tc ON tc.id=mt.skill_id WHERE mt.passport_id=? AND mt.active=1 AND tc.code=?`).bind(passport.passport_id, value).first());
+  if (type === "mission") return Boolean(await env.DB.prepare(`SELECT 1 ok FROM mission_completions mc JOIN missions m ON m.id=mc.mission_id WHERE mc.passport_id=? AND m.code=?`).bind(passport.passport_id, value).first());
+  if (type === "signal_history") return Boolean(await env.DB.prepare(`SELECT 1 ok FROM signal_relays WHERE sender_passport_id=? OR recipient_passport_id=? LIMIT 1`).bind(passport.passport_id, passport.passport_id).first());
+  return false;
+}
+
+async function getCommandCenter(body, env, cors) {
+  const eventId = Number(body.eventId || 0);
+  const [activity, watched, pulses, events, drops, transmissions, ghost, checkedIn] = await Promise.all([
+    listAdminActivityData(env).catch((error) => { console.error("Command Center activity unavailable", error); return []; }),
+    env.DB.prepare(`SELECT p.id passport_id, p.member_name, c.card_number, w.note FROM admin_watchlist w JOIN passports p ON p.id=w.passport_id JOIN cards c ON c.id=p.card_id ORDER BY w.watched_at DESC`).all(),
+    env.DB.prepare(`SELECT p.id passport_id, p.member_name, c.card_number, p.activation_date,
+      MAX(COALESCE(mc.verified_at, ea.checked_in_at, tc.checked_at, p.activation_date)) last_activity,
+      COUNT(DISTINCT mc.id) mission_count FROM passports p JOIN cards c ON c.id=p.card_id LEFT JOIN mission_completions mc ON mc.passport_id=p.id LEFT JOIN event_attendance ea ON ea.passport_id=p.id LEFT JOIN technique_checks tc ON tc.passport_id=p.id WHERE p.status='claimed' GROUP BY p.id ORDER BY last_activity DESC`).all(),
+    env.DB.prepare(`SELECT id, title, starts_at, location, active FROM events ORDER BY starts_at DESC LIMIT 20`).all(),
+    env.DB.prepare(`SELECT dd.*, (SELECT COUNT(*) FROM dead_drop_claims c WHERE c.dead_drop_id=dd.id) claim_count FROM dead_drops dd ORDER BY created_at DESC`).all(),
+    env.DB.prepare(`SELECT mt.*, COUNT(mr.passport_id) recipient_count FROM manual_transmissions mt JOIN manual_transmission_recipients mr ON mr.transmission_id=mt.id GROUP BY mt.id ORDER BY mt.created_at DESC LIMIT 30`).all(),
+    env.DB.prepare(`SELECT code,title,trigger_type,trigger_value,operator_active,active FROM missions WHERE visibility_mode='ghost' ORDER BY sort_order,id`).all(),
+    eventId ? env.DB.prepare(`SELECT p.id passport_id, p.member_name, c.card_number, ea.checked_in_at,
+      GROUP_CONCAT(DISTINCT tc.name) targets FROM event_attendance ea JOIN passports p ON p.id=ea.passport_id JOIN cards c ON c.id=p.card_id
+      LEFT JOIN member_targets mt ON mt.passport_id=p.id AND mt.active=1 LEFT JOIN technique_competencies tc ON tc.id=mt.skill_id
+      WHERE ea.event_id=? AND NOT EXISTS (SELECT 1 FROM admin_corrections ac WHERE ac.target_type='event_attendance' AND ac.target_id=CAST(ea.id AS TEXT) AND ac.affects_effective_state=1)
+      GROUP BY p.id,ea.id ORDER BY ea.checked_in_at DESC`).bind(eventId).all() : Promise.resolve({ results: [] })
+  ]);
+  const now = Date.now(); const pulse = (pulses.results || []).map((member) => { const age = now - new Date(String(member.last_activity).replace(" ", "T") + (String(member.last_activity).includes("T") ? "" : "Z")).getTime(); const sinceClaim = now - new Date(String(member.activation_date).replace(" ", "T") + (String(member.activation_date).includes("T") ? "" : "Z")).getTime(); return { ...member, pulse: sinceClaim < MEMBER_PULSE_THRESHOLDS.newDays*86400000 ? "NEW" : age < MEMBER_PULSE_THRESHOLDS.movingHours*3600000 && Number(member.mission_count)>0 ? "MOVING" : age < MEMBER_PULSE_THRESHOLDS.activeDays*86400000 ? "ACTIVE" : age < MEMBER_PULSE_THRESHOLDS.dormantDays*86400000 ? "QUIET" : "DORMANT" }; });
+  const radar = eventId ? await buildOverlapRadar({ eventId }, env, null) : null; const radarData = radar ? await radar.json() : { matches: [] };
+  return json({ activity, watchlist: watched.results || [], memberPulse: pulse, checkedIn: checkedIn.results || [], events: events.results || [], deadDrops: drops.results || [], transmissions: transmissions.results || [], ghostMissions: ghost.results || [], overlapRadar: radarData.matches || [] }, 200, cors);
+}
+
+async function listAdminActivityData(env) {
+  const response = await listAdminActivity(env, {}); const payload = await response.json(); return payload.activity || [];
+}
+
+function normalizeShortCode(value, label) { const code = String(value || "").trim().toLowerCase(); if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(code)) throw new HttpError(400, `Enter a valid ${label} code.`); return code; }
+function normalizeText(value, min, max, label) { const text = String(value || "").trim().replace(/\s+/g, " "); if (text.length < min || text.length > max) throw new HttpError(400, `Enter a valid ${label}.`); return text; }
+function normalizeStringArray(value, maxItems, maxLength) { if (!Array.isArray(value)) return []; return value.slice(0, maxItems).map((item) => String(item || "").trim().slice(0, maxLength)).filter(Boolean); }
 
 function parseJsonArray(value) {
   if (!value) return [];

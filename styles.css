@@ -30,6 +30,11 @@ body {
   background: var(--bg);
 }
 
+:focus-visible {
+  outline: 3px solid #111111;
+  outline-offset: 4px;
+}
+
 img {
   max-width: 100%;
   height: auto;
@@ -262,6 +267,13 @@ section {
   justify-content: center;
   flex-wrap: wrap;
   gap: 0.8rem;
+}
+
+.adult-use-notice {
+  margin: 1rem auto 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .hero-event {
@@ -647,6 +659,23 @@ section {
 
 .footer-logo {
   width: 150px;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.25rem;
+}
+
+.footer-links a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
 /* Mobile adjustments */

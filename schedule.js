@@ -1,7 +1,19 @@
 const SCHEDULE_API_URL = "https://justbaila-inner-circle-api.justbaila-inner-circle.workers.dev/api/public/schedule";
 const scheduleList = document.querySelector("#schedule-list");
 
-if (scheduleList) loadSchedule();
+if (scheduleList) {
+  enhanceStaticScheduleLinks();
+  loadSchedule();
+}
+
+function enhanceStaticScheduleLinks() {
+  const language = scheduleList.dataset.language === "es" ? "es" : "en";
+  scheduleList.querySelectorAll(".schedule-class-row").forEach((row) => {
+    const className = row.querySelector(".schedule-class-meta p:first-child .schedule-value")?.textContent?.trim();
+    const link = row.querySelector(".schedule-link");
+    if (link && className) link.setAttribute("aria-label", language === "es" ? `Inscribirse o conocer más sobre ${className}` : `Sign up or learn more about ${className}`);
+  });
+}
 
 async function loadSchedule() {
   try {
@@ -70,6 +82,8 @@ function makeClassRow(entry, language, labels) {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = language === "es" ? entry.linkLabelEs : entry.linkLabelEn;
+    const className = language === "es" ? entry.classNameEs : entry.classNameEn;
+    link.setAttribute("aria-label", language === "es" ? `Inscribirse o conocer más sobre ${className}` : `Sign up or learn more about ${className}`);
     row.append(link);
   }
   return row;

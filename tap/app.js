@@ -95,6 +95,7 @@ const states = {
   invalid: document.querySelector("#invalid-state"),
   error: document.querySelector("#error-state"),
   claim: document.querySelector("#claim-state"),
+  legal: document.querySelector("#legal-state"),
   pinSetup: document.querySelector("#pin-setup-state"),
   pin: document.querySelector("#pin-state"),
   passport: document.querySelector("#passport-state")
@@ -104,6 +105,7 @@ const accessLabel = document.querySelector("#access-label");
 const accessSeal = document.querySelector("#access-seal");
 const gatedContent = document.querySelectorAll(".gated-content");
 const claimForm = document.querySelector("#claim-form");
+const legalForm = document.querySelector("#legal-form");
 const claimMessage = document.querySelector("#claim-message");
 const pinSetupForm = document.querySelector("#pin-setup-form");
 const pinForm = document.querySelector("#pin-form");
@@ -150,8 +152,10 @@ const classifiedContactForm = document.querySelector("#classified-contact-form")
 const classifiedsSection = document.querySelector("#classifieds");
 const classifiedsTrigger = document.querySelector("#classifieds-trigger");
 let memberIntroSeenThisSession = false;
+let pendingLegalPassport = null;
 
 claimForm.addEventListener("submit", claimPassport);
+legalForm.addEventListener("submit", acceptLegalTerms);
 pinSetupForm.addEventListener("submit", setupPin);
 pinForm.addEventListener("submit", unlockPin);
 document.querySelector("#pin-forgot").addEventListener("click", requestPinReset);
@@ -165,6 +169,7 @@ classifiedContactForm.addEventListener("submit", saveClassifiedContact);
 classifiedsTrigger.addEventListener("click", openClassifieds);
 document.querySelector("#classifieds-close").addEventListener("click", closeClassifieds);
 document.querySelector("#technique-return").addEventListener("click", closeTechniqueLab);
+document.querySelector("#target-role").addEventListener("change", updateTechniqueRole);
 document.querySelector("#technique-enter").addEventListener("click", revealTechniqueInterface);
 document.querySelector("#instructor-member").addEventListener("change", loadInstructorMember);
 document.querySelector("#instructor-competency").addEventListener("change", updateInstructorGuidance);
@@ -405,6 +410,9 @@ async function claimPassport(event) {
   claimMessage.textContent = "";
   const submitButton = claimForm.querySelector("button[type='submit']");
   const memberName = new FormData(claimForm).get("memberName")?.toString().trim() || "";
+  const claimData = new FormData(claimForm);
+  const adultConfirmed = claimData.get("adultConfirmed") === "on";
+  const legalAccepted = claimData.get("legalAccepted") === "on";
   submitButton.disabled = true;
   submitButton.textContent = "Opening access…";
 
@@ -412,7 +420,7 @@ async function claimPassport(event) {
     const response = await fetch(`${API_BASE_URL}/api/card/claim`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, memberName })
+      body: JSON.stringify({ cardId, memberName, adultConfirmed, termsAccepted: legalAccepted, privacyAcknowledged: legalAccepted })
     });
     const result = await response.json();
     if ((response.ok || response.status === 409) && result.status === "pin_setup") { showState("pinSetup", "Secure your access"); return; }
@@ -426,6 +434,35 @@ async function claimPassport(event) {
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = "Enter the Underground";
+  }
+}
+
+async function acceptLegalTerms(event) {
+  event.preventDefault();
+  const data = new FormData(legalForm);
+  const button = legalForm.querySelector("button[type='submit']");
+  const message = document.querySelector("#legal-message");
+  button.disabled = true;
+  message.textContent = "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/member/legal/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(memberPayload({
+        adultConfirmed: data.get("adultConfirmed") === "on",
+        termsAccepted: data.get("legalAccepted") === "on",
+        privacyAcknowledged: data.get("legalAccepted") === "on"
+      }))
+    });
+    const result = await response.json();
+    if (!response.ok || !result.passport) throw new Error(result.error || "Your confirmation could not be saved.");
+    pendingLegalPassport = null;
+    legalForm.reset();
+    renderPassport(result.passport);
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -539,6 +576,13 @@ async function claimMilestone(event) {
 }
 
 function renderPassport(passport) {
+  if (passport.legalAcceptanceRequired) {
+    pendingLegalPassport = passport;
+    showState("legal", "Confirmation required");
+    legalForm.querySelector("input").focus();
+    return;
+  }
+  pendingLegalPassport = null;
   const previousLevel = currentUndergroundLevel;
   currentUndergroundLevel = passport.undergroundLevel;
   document.querySelector("#passport-name").textContent = passport.memberName;
@@ -583,6 +627,7 @@ function renderPassport(passport) {
   renderMissions(passport.missions || []);
   renderClassifieds(passport.classifieds || { accessGranted: false });
   renderTechniqueLab(currentTechniqueLab);
+  renderCommandLayer(passport);
   updateRedButtonState();
   updateSecretKeyState();
   showState("passport", "Access granted");
@@ -1133,9 +1178,16 @@ function renderTechniqueLab(techniqueLab) {
   const availability = document.querySelector("#technique-availability");
   availability.hidden = !techniqueLab.checksAvailable;
   const availabilityWindow = document.querySelector("#technique-window");
-  availabilityWindow.hidden = !techniqueLab.availabilityWindow;
+  availabilityWindow.hidden = !techniqueLab.checksAvailable || !techniqueLab.availabilityWindow;
   availabilityWindow.textContent = techniqueLab.availabilityWindow ? `Next instructor availability: ${techniqueLab.availabilityWindow}` : "";
+  renderCurrentTargets(techniqueLab);
+  const evaluations = document.querySelector("#technique-evaluations");
+  evaluations.hidden = !techniqueLab.checksAvailable;
   const grid = document.querySelector("#technique-grid");
+  if (!techniqueLab.checksAvailable) {
+    grid.replaceChildren();
+    return;
+  }
   grid.replaceChildren(...techniqueLab.competencies.map((competency) => {
     const article = document.createElement("article");
     article.className = `technique-card technique-${competency.state.replace("_", "-")}`;
@@ -1173,6 +1225,44 @@ function renderTechniqueLab(techniqueLab) {
     return article;
   }));
 }
+
+function renderCurrentTargets(techniqueLab) {
+  const roleSelector = document.querySelector("#target-role");
+  roleSelector.value = techniqueLab.preferredRole || "";
+  const current = document.querySelector("#current-targets");
+  const activeCodes = new Set((techniqueLab.currentTargets || []).map((target) => target.code));
+  current.replaceChildren(...(techniqueLab.currentTargets || []).map((target) => {
+    const card = document.createElement("article"); card.className = "technique-card target-card";
+    const heading = document.createElement("div"); heading.className = "technique-card-heading";
+    const title = document.createElement("h3"); title.textContent = target.name;
+    const status = document.createElement("span"); status.textContent = target.status.replaceAll("_", " "); heading.append(title, status);
+    const copy = document.createElement("p"); copy.textContent = target.description;
+    const guidance = document.createElement("ul"); guidance.className = "target-guidance"; target.guidance.forEach((prompt) => { const item = document.createElement("li"); item.textContent = prompt; guidance.append(item); });
+    const controls = document.createElement("div"); controls.className = "target-actions";
+    [["Still learning","learning"],["Getting there","working"],["Feeling good","comfortable"]].forEach(([label,value]) => { const button=document.createElement("button");button.type="button";button.className="small-action";button.textContent=label;button.disabled=target.status===value;button.addEventListener("click",()=>updateTarget(target.code,"status",{status:value}));controls.append(button); });
+    const clear=document.createElement("button");clear.type="button";clear.className="target-clear-action";clear.textContent="Clear target";clear.addEventListener("click",()=>updateTarget(target.code,"clear"));controls.append(clear);card.append(heading,copy,guidance,controls);return card;
+  }));
+  if (!current.children.length) { const empty=document.createElement("p");empty.textContent="No Current Targets. Choose something worth chasing.";current.append(empty); }
+  const catalog=document.querySelector("#target-catalog");
+  catalog.replaceChildren(...techniqueLab.competencies.filter((skill)=>skill.targetEligible!==false&&!activeCodes.has(skill.code)&&(skill.role==="either"||skill.role===techniqueLab.preferredRole)).map((skill)=>{const card=document.createElement("article");card.className="technique-card target-card";const title=document.createElement("h3");title.textContent=skill.name;const copy=document.createElement("p");copy.textContent=skill.description;const add=document.createElement("button");add.type="button";add.className="small-action";add.textContent="Add to Targets";add.disabled=(techniqueLab.currentTargets||[]).length>=3;add.addEventListener("click",()=>updateTarget(skill.code,"add"));card.append(title,copy,add);return card;}));
+  const suggestions=document.querySelector("#target-suggestions");suggestions.replaceChildren(...(techniqueLab.suggestions||[]).map((suggestion)=>{const card=document.createElement("article");card.className="technique-feedback";const title=document.createElement("strong");title.textContent=`LAB NOTE · ${suggestion.name}`;const copy=document.createElement("p");copy.textContent=suggestion.description;const accept=document.createElement("button");accept.type="button";accept.className="small-action";accept.textContent="Add to Targets";accept.addEventListener("click",()=>respondSuggestion(suggestion.id,"accept"));const decline=document.createElement("button");decline.type="button";decline.className="small-action";decline.textContent="Not now";decline.addEventListener("click",()=>respondSuggestion(suggestion.id,"decline"));card.append(title,copy,accept,decline);return card;}));
+}
+
+async function techniqueTargetApi(path, payload) { const response=await fetch(`${API_BASE_URL}${path}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(memberPayload(payload))});const result=await response.json();if(!response.ok)throw new Error(result.error||"The Lab could not save that.");return result; }
+async function updateTechniqueRole(event){const message=document.querySelector("#target-message");try{const result=await techniqueTargetApi("/api/technique/targets/preference",{preferredRole:event.target.value});currentTechniqueLab.preferredRole=result.preferredRole;renderTechniqueLab(currentTechniqueLab);message.textContent=result.preferredRole?`${result.preferredRole==="lead"?"Lead":"Follow"} skills selected.`:"Choose Lead or Follow to filter skills.";}catch(error){message.textContent=error.message;}}
+async function updateTarget(skillCode,action,extra={}){const message=document.querySelector("#target-message");try{const result=await techniqueTargetApi("/api/technique/targets/update",{skillCode,action,...extra});currentTechniqueLab=result.techniqueLab;renderTechniqueLab(currentTechniqueLab);message.textContent="Target updated.";}catch(error){message.textContent=error.message;}}
+async function respondSuggestion(suggestionId,action){const message=document.querySelector("#target-message");try{const result=await techniqueTargetApi("/api/technique/targets/suggestion",{suggestionId,action});currentTechniqueLab=result.techniqueLab;renderTechniqueLab(currentTechniqueLab);message.textContent=action==="accept"?"Target added.":"Lab Note dismissed.";}catch(error){message.textContent=error.message;}}
+
+function renderCommandLayer(passport) {
+  const section=document.querySelector("#command-layer"),grid=document.querySelector("#command-layer-grid");const items=[];
+  (passport.transmissions||[]).forEach((signal)=>items.push({kind:"TRANSMISSION",title:signal.message_type.replaceAll("_"," "),body:signal.message,action:"Dismiss",run:()=>dismissCommandItem("/api/member/transmission/dismiss",{transmissionId:signal.id})}));
+  (passport.deadDrops||[]).forEach((drop)=>items.push({kind:"DEAD DROP",title:drop.title,body:drop.body,action:"Claim",run:()=>dismissCommandItem("/api/member/dead-drop/claim",{deadDropId:drop.id})}));
+  (passport.activeOverlaps||[]).forEach((overlap)=>items.push({kind:"OVERLAP DETECTED",title:overlap.firstSkill===overlap.secondSkill?overlap.firstSkill:`${overlap.firstSkill} / ${overlap.secondSkill}`,body:`You and ${overlap.partnerCard} may be working on compatible things. Find each other. One dance is enough.`,action:"Accept invitation",secondary:"Not tonight",run:()=>respondToOverlap(overlap.id,"accept"),decline:()=>respondToOverlap(overlap.id,"decline")}));
+  grid.replaceChildren(...items.map((item)=>{const card=document.createElement("article");card.className="command-layer-card";const kind=document.createElement("p");kind.className="section-kicker";kind.textContent=item.kind;const title=document.createElement("h3");title.textContent=item.title;const copy=document.createElement("p");copy.textContent=item.body;const action=document.createElement("button");action.type="button";action.className="member-button";action.textContent=item.action;action.addEventListener("click",item.run);card.append(kind,title,copy,action);if(item.secondary){const second=document.createElement("button");second.type="button";second.className="small-action";second.textContent=item.secondary;second.addEventListener("click",item.decline);card.append(second);}return card;}));section.hidden=!items.length;
+}
+async function dismissCommandItem(path,payload){try{await techniqueTargetApi(path,payload);await refreshPassport();}catch(error){window.alert(error.message);}}
+async function respondToOverlap(overlapId,action){try{await techniqueTargetApi("/api/technique/targets/overlap",{overlapId,action});await refreshPassport();}catch(error){window.alert(error.message);}}
+async function refreshPassport(){const response=await fetch(`${API_BASE_URL}/api/card/lookup`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cardId,accessToken})});const result=await response.json();if(response.ok&&result.passport)renderPassport(result.passport);}
 
 async function requestTechniqueCheck(competency, button) {
   const message = document.querySelector("#technique-message");
@@ -1708,7 +1798,7 @@ function renderClassifiedBoard(listings) {
     }
     const byline = document.createElement("p");
     byline.className = "classified-byline";
-    byline.textContent = `— ${listing.operative} · Posted ${formatDate(listing.postedAt)} · Expires ${formatDate(listing.expiresAt)}`;
+    byline.textContent = `— ${listing.memberLabel || "Underground member"} · Posted ${formatDate(listing.postedAt)} · Expires ${formatDate(listing.expiresAt)}`;
     article.append(byline);
     const actions = document.createElement("div");
     actions.className = "classified-actions";
@@ -1727,8 +1817,9 @@ function renderClassifiedBoard(listings) {
       sent.textContent = "Response sent";
       actions.append(sent);
     }
-    actions.append(makeClassifiedAction("Report", () => reportClassified("listing", listing.id), "quiet"));
+    actions.append(makeClassifiedAction("Report listing", () => toggleClassifiedReportForm(article), "quiet"));
     article.append(actions);
+    article.append(makeClassifiedReportForm("listing", listing.id));
     return article;
   }));
 }
@@ -1772,7 +1863,7 @@ function renderClassifiedResponses(responses) {
     label.className = "classified-category";
     label.textContent = "Response to your Classified";
     const heading = document.createElement("h4");
-    heading.textContent = `${response.operative} responded to “${response.listingTitle}”`;
+    heading.textContent = `${response.memberLabel || "Underground member"} responded to “${response.listingTitle}”`;
     const message = document.createElement("blockquote");
     message.textContent = response.message;
     article.append(label, heading, message);
@@ -1789,8 +1880,9 @@ function renderClassifiedResponses(responses) {
       shared.textContent = "Contact shared";
       actions.append(shared);
     }
-    actions.append(makeClassifiedAction("Report", () => reportClassified("response", response.id), "quiet"));
+    actions.append(makeClassifiedAction("Report response", () => toggleClassifiedReportForm(article), "quiet"));
     article.append(actions);
+    article.append(makeClassifiedReportForm("response", response.id));
     return article;
   }));
 }
@@ -1803,7 +1895,7 @@ function renderClassifiedContacts(contacts) {
     const article = document.createElement("article");
     article.className = "classified-contact-card";
     const heading = document.createElement("h4");
-    heading.textContent = `${share.operative} has chosen to connect.`;
+    heading.textContent = `${share.memberLabel || "An Underground member"} has chosen to connect.`;
     const detail = document.createElement("p");
     detail.textContent = `Regarding “${share.listingTitle}”`;
     const contact = document.createElement(share.contact.href ? "a" : "p");
@@ -1867,14 +1959,53 @@ async function classifiedResponseAction(responseId, action) {
   } catch (error) { message.textContent = error.message; }
 }
 
-async function reportClassified(targetType, targetId) {
-  const reason = window.prompt("Optional note for the JustBaila team:", "");
-  if (reason === null) return;
-  const message = document.querySelector("#classifieds-message");
+function makeClassifiedReportForm(targetType, targetId) {
+  const form = document.createElement("form");
+  form.className = "classified-response-form classified-report-form";
+  form.hidden = true;
+  const label = document.createElement("label");
+  label.textContent = "Tell the JustBaila team what happened (optional)";
+  const textarea = document.createElement("textarea");
+  textarea.name = "reason";
+  textarea.maxLength = 200;
+  textarea.rows = 3;
+  label.append(textarea);
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Send report";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "classified-action-quiet";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => { form.hidden = true; });
+  const message = document.createElement("p");
+  message.className = "form-message";
+  message.setAttribute("aria-live", "polite");
+  form.append(label, submit, cancel, message);
+  form.addEventListener("submit", (event) => reportClassified(event, targetType, targetId));
+  return form;
+}
+
+function toggleClassifiedReportForm(article) {
+  const form = article.querySelector(".classified-report-form");
+  form.hidden = !form.hidden;
+  if (!form.hidden) form.querySelector("textarea").focus();
+}
+
+async function reportClassified(event, targetType, targetId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const reason = String(new FormData(form).get("reason") || "").trim();
+  const message = form.querySelector(".form-message");
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  message.textContent = "";
   try {
     await classifiedApi("/api/classifieds/report", { targetType, targetId, reason });
     message.textContent = "Report sent to the JustBaila team.";
+    form.reset();
   } catch (error) { message.textContent = error.message; }
+  finally { button.disabled = false; }
 }
 
 async function submitClassifiedRequest(form, message, path, values, success, reset = true) {
@@ -2015,6 +2146,7 @@ function showState(activeState, label) {
 function updateHeroCopy(activeState) {
   const preaccessCopy = {
     claim: "A place has been held for you.",
+    legal: "The door is waiting.",
     pinSetup: "The door remembers this card.",
     pin: "The door remembers this card."
   };

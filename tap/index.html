@@ -14,8 +14,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
-  <link rel="stylesheet" href="tap.css?v=20260928-cave-blackout1" />
-  <script src="app.js?v=20260928-nominations1" defer></script>
+  <link rel="stylesheet" href="tap.css?v=20261011-activation-consent" />
+  <script src="app.js?v=20261011-activation-consent" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
@@ -97,8 +97,24 @@
           <form class="claim-form" id="claim-form">
             <label for="member-name">Name in the Underground</label>
             <input id="member-name" name="memberName" type="text" minlength="2" maxlength="80" autocomplete="name" required />
+            <label class="legal-check"><input name="adultConfirmed" type="checkbox" required /> <span>I confirm that I am at least 18 years old.</span></label>
+            <label class="legal-check"><input name="legalAccepted" type="checkbox" required /> <span>I agree to the <a href="../terms.html" target="_blank" rel="noopener">Terms of Use</a> and acknowledge the <a href="../privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
+            <p class="legal-document-links"><a href="../privacy.html" target="_blank" rel="noopener">Read Privacy Policy</a><a href="../terms.html" target="_blank" rel="noopener">Read Terms of Use</a></p>
             <button class="member-button" type="submit">Enter the Underground</button>
             <p class="form-message" id="claim-message" aria-live="polite"></p>
+          </form>
+        </div>
+
+        <div class="passport-state claim-state" id="legal-state" hidden>
+          <p class="section-kicker">Before you continue</p>
+          <h2>Confirm your access.</h2>
+          <p>The Underground is for adults age 18 and older. Please review the current policies to continue using your access card.</p>
+          <form class="claim-form" id="legal-form">
+            <label class="legal-check"><input name="adultConfirmed" type="checkbox" required /> <span>I confirm that I am at least 18 years old.</span></label>
+            <label class="legal-check"><input name="legalAccepted" type="checkbox" required /> <span>I agree to the <a href="../terms.html" target="_blank" rel="noopener">Terms of Use</a> and acknowledge the <a href="../privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
+            <p class="legal-document-links"><a href="../privacy.html" target="_blank" rel="noopener">Read Privacy Policy</a><a href="../terms.html" target="_blank" rel="noopener">Read Terms of Use</a></p>
+            <button class="member-button" type="submit">Continue</button>
+            <p class="form-message" id="legal-message" aria-live="polite"></p>
           </form>
         </div>
 
@@ -162,8 +178,20 @@
             <p class="technique-availability" id="technique-availability" hidden>Instructor feedback available</p>
           </div>
           <p class="technique-window" id="technique-window" hidden></p>
-          <div class="technique-grid" id="technique-grid"></div>
-          <p class="form-message" id="technique-message" aria-live="polite"></p>
+          <section class="target-room" id="target-room">
+            <div class="technique-card-heading"><div><p class="section-kicker">Current Targets</p><h3>What you are working on now</h3></div></div>
+            <p class="target-room-copy">Choose up to three. These are yours—not grades, assignments, or instructor approvals.</p>
+            <label class="target-role-selector">Show skills for<select id="target-role"><option value="">Choose Lead or Follow</option><option value="lead">Lead</option><option value="follow">Follow</option></select></label>
+            <div class="target-grid" id="current-targets"></div>
+            <details class="target-browser"><summary>Choose a skill</summary><div class="target-grid" id="target-catalog"></div></details>
+            <div class="target-suggestions" id="target-suggestions"></div>
+            <p class="form-message" id="target-message" aria-live="polite"></p>
+          </section>
+          <section id="technique-evaluations" hidden>
+            <p class="section-kicker technique-history-label">Technique evaluations</p>
+            <div class="technique-grid" id="technique-grid"></div>
+            <p class="form-message" id="technique-message" aria-live="polite"></p>
+          </section>
           <section class="instructor-console" id="instructor-console" aria-labelledby="instructor-console-title" hidden>
             <div class="instructor-console-heading"><p class="section-kicker">Instructor access</p><h3 id="instructor-console-title">Feedback Room</h3><p>Record a private Technique Lab evaluation for another member.</p></div>
             <div class="instructor-request-list" id="instructor-request-list"></div>
@@ -180,6 +208,10 @@
           </section>
         </div>
       </div>
+    </section>
+
+    <section class="command-layer gated-content" id="command-layer" aria-label="Underground notices" hidden>
+      <div class="command-layer-grid" id="command-layer-grid"></div>
     </section>
 
     <section class="signals-section gated-content" aria-labelledby="signals-title" hidden>
@@ -265,7 +297,7 @@
         <header class="classifieds-heading"><p class="section-kicker">Agent channel</p><h2 id="classifieds-title">Classifieds</h2><p>Practice. Exchange. Make the plan. Then take it offline.</p></header>
         <div class="classifieds-clearance" id="classifieds-clearance" hidden><strong>Agent clearance required</strong></div>
         <div id="classifieds-interface" hidden>
-          <aside class="classifieds-boundary"><strong>This is not a dating service.</strong><span>Classifieds are for dance practice, skill exchange, and dance-community plans. Anything that appears to be using this board for dating or solicitation will be removed.</span></aside>
+          <aside class="classifieds-boundary"><strong>This is not a dating service.</strong><span>Classifieds are for dance practice, skill exchange, and dance-community plans. Listings do not display member or card numbers. Keep phone numbers, email addresses, links, and social handles out of posts and responses; private contact is shared only with deliberate consent. Dating, solicitation, harassment, and abuse will be removed.</span></aside>
           <div class="classifieds-controls">
             <details class="classifieds-control"><summary>Post a classified</summary><form id="classified-form"><label>Category<select name="category" required><option value="practice_partner">Practice Partner</option><option value="skill_exchange">Skill Exchange</option><option value="dance_plans">Dance Plans</option><option value="other">Other</option></select></label><label>Short title<input name="title" maxlength="60" required /></label><label>Description<textarea name="description" maxlength="400" rows="3" required></textarea></label><label>Preferred availability <span>Optional</span><input name="availability" maxlength="160" /></label><button type="submit">Post for seven days</button><p class="form-message" id="classified-form-message" aria-live="polite"></p></form></details>
             <details class="classifieds-control"><summary>Private contact method</summary><form id="classified-contact-form"><label>Contact type<select name="contactType" required><option value="phone">Phone / text</option><option value="instagram">Instagram</option><option value="other">Other</option></select></label><label>Contact information<input name="contactValue" maxlength="120" required /></label><p class="classifieds-privacy">Hidden unless you deliberately share it with a specific respondent.</p><button type="submit">Save private contact</button><p class="form-message" id="classified-contact-message" aria-live="polite"></p></form></details>
@@ -425,7 +457,8 @@
 
   <footer class="private-footer">
     <p>The Underground exists just beneath the surface of JustBaila.</p>
-    <a href="../index.html">Return to JustBaila</a>
+    <p class="private-footer-links"><a href="../index.html">Return to JustBaila</a><a href="../privacy.html">Privacy</a><a href="../terms.html">Terms</a><a href="../accessibility.html">Accessibility Statement</a><a href="mailto:justbaila@gmail.com?subject=Underground%20Issue">Report an Issue</a></p>
+    <p>Underground membership is limited to adults age 18 and older.</p>
   </footer>
 </body>
 </html>
