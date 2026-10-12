@@ -10,8 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20261012-community-editor" />
   <script src="schedule.js" defer></script>
+  <script src="community-events.js?v=20261012-community-editor" defer></script>
   <link rel="alternate" hreflang="en" href="index.html" />
 </head>
 <body>
@@ -227,21 +228,21 @@
     <section class="events" id="events" aria-labelledby="events-title">
       <div class="section-container events-content">
         <div>
-          <p class="events-kicker">Calendario comunitario</p>
-          <h2 class="section-title section-title-left" id="events-title">Eventos comunitarios</h2>
-          <p class="events-description">
+          <p class="events-kicker" data-community-field="kicker">Calendario comunitario</p>
+          <h2 class="section-title section-title-left" id="events-title" data-community-field="title">Eventos comunitarios</h2>
+          <p class="events-description" data-community-field="description">
             Mantente conectado con los próximos sociales, talleres, presentaciones y encuentros comunitarios de baile. Revisa el calendario para conocer los eventos más recientes y las formas de bailar con nosotros. Próximo evento: Uptown Lounge, 11 de octubre de 2026. Clase a las 6:30 PM.
           </p>
-          <div class="community-invite">
-            <h3>Próximo evento</h3>
-            <p>Únete a nosotros en Uptown Lounge el 11 de octubre de 2026 para una fiesta de baile latino con Salsa, Bachata, Merengue, Cumbia y más. Con DJ Eya. Clase a las 6:30 PM y baile social de 7:30 PM a 10:00 PM.</p>
+          <div class="community-invite" data-community-block="next">
+            <h3 data-community-field="nextTitle">Próximo evento</h3>
+            <p data-community-field="nextDescription">Únete a nosotros en Uptown Lounge el 11 de octubre de 2026 para una fiesta de baile latino con Salsa, Bachata, Merengue, Cumbia y más. Con DJ Eya. Clase a las 6:30 PM y baile social de 7:30 PM a 10:00 PM.</p>
           </div>
-          <div class="community-invite">
-            <h3>Lleva el baile a tu comunidad</h3>
-            <p>¿Quieres que llevemos una clase de baile para principiantes, una demostración o un social a tu grupo? Contáctanos.</p>
+          <div class="community-invite" data-community-block="outreach">
+            <h3 data-community-field="outreachTitle">Lleva el baile a tu comunidad</h3>
+            <p data-community-field="outreachDescription">¿Quieres que llevemos una clase de baile para principiantes, una demostración o un social a tu grupo? Contáctanos.</p>
           </div>
         </div>
-        <a href="https://calendar.google.com/calendar/embed?src=a800af1f4fa443f749fb67bff186caa877b91ad9ecfea7cfcfb779497eafae9c%40group.calendar.google.com&ctz=America%2FLos_Angeles" class="btn btn-primary events-button" target="_blank" rel="noopener noreferrer">Calendario Comunitario</a>
+        <a href="https://calendar.google.com/calendar/embed?src=a800af1f4fa443f749fb67bff186caa877b91ad9ecfea7cfcfb779497eafae9c%40group.calendar.google.com&ctz=America%2FLos_Angeles" class="btn btn-primary events-button" target="_blank" rel="noopener noreferrer" data-community-field="buttonLabel">Calendario Comunitario</a>
       </div>
     </section>
 

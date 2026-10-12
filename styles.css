@@ -509,6 +509,10 @@ section {
   text-transform: uppercase;
 }
 
+#events [hidden] {
+  display: none !important;
+}
+
 .community-invite {
   max-width: 680px;
   margin-top: 1rem;

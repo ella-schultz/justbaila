@@ -45,6 +45,65 @@ function fixture() {
   return { db, env, request, activate };
 }
 
+test('Community Events preserves seeded text, requires admin access and publishes both languages', async () => {
+  const { db, env, request } = fixture();
+  const original = await request('/api/admin/community-events/get', {}, true);
+  assert.equal(original.status, 200);
+  assert.equal(original.body.content.en.title, 'Community Events');
+  assert.equal(original.body.content.es.title, 'Eventos comunitarios');
+  assert.equal((await request('/api/admin/community-events/get')).status, 401);
+  const content = structuredClone(original.body.content);
+  content.en.nextTitle = 'Our next social';
+  content.en.nextDescription = 'Friday at 7 PM';
+  content.es.nextTitle = 'Nuestro próximo social';
+  content.es.nextDescription = 'Viernes a las 7 PM';
+  assert.equal((await request('/api/admin/community-events/update', { content, revision: 1 })).status, 401);
+  const updated = await request('/api/admin/community-events/update', { content, revision: 1 }, true);
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.revision, 2);
+  const response = await worker.fetch(new Request('https://example.invalid/api/public/community-events', { headers: { Origin: 'http://localhost:8999' } }), env);
+  assert.equal(response.status, 200);
+  const published = await response.json();
+  assert.deepEqual(published.content, content);
+  assert.deepEqual(Object.keys(published).sort(), ['content', 'revision']);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM security_audit_log WHERE event_type = 'community_events_updated'").get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM event_attendance').get().count, 0);
+});
+
+test('Community Events rejects unsafe links, incomplete translations and stale saves', async () => {
+  const { request } = fixture();
+  const original = (await request('/api/admin/community-events/get', {}, true)).body;
+  for (const calendarUrl of ['javascript:alert(1)', 'http://example.com', 'https://user:password@example.com']) {
+    const invalid = { ...original, content: { ...original.content, calendarUrl } };
+    assert.equal((await request('/api/admin/community-events/update', invalid, true)).status, 400);
+  }
+  const incomplete = structuredClone(original);
+  incomplete.content.es.nextTitle = '';
+  assert.equal((await request('/api/admin/community-events/update', incomplete, true)).status, 400);
+  delete incomplete.content.es;
+  assert.equal((await request('/api/admin/community-events/update', incomplete, true)).status, 400);
+  const tooLong = structuredClone(original);
+  tooLong.content.en.nextDescription = 'x'.repeat(2001);
+  assert.equal((await request('/api/admin/community-events/update', tooLong, true)).status, 400);
+  assert.equal((await request('/api/admin/community-events/update', original, true)).status, 200);
+  assert.equal((await request('/api/admin/community-events/update', original, true)).status, 409);
+  assert.equal((await request('/api/admin/community-events/get', {}, true)).body.revision, 2);
+});
+
+test('Community Events optional blocks and calendar buttons can be cleared without deleting content history elsewhere', async () => {
+  const { request } = fixture();
+  const body = (await request('/api/admin/community-events/get', {}, true)).body;
+  for (const language of ['en', 'es']) {
+    for (const field of ['nextTitle', 'nextDescription', 'outreachTitle', 'outreachDescription', 'buttonLabel']) body.content[language][field] = '';
+  }
+  body.content.calendarUrl = '';
+  assert.equal((await request('/api/admin/community-events/update', body, true)).status, 200);
+  const saved = (await request('/api/admin/community-events/get', {}, true)).body.content;
+  assert.equal(saved.en.nextDescription, '');
+  assert.equal(saved.es.buttonLabel, '');
+  assert.equal(saved.calendarUrl, '');
+});
+
 test('activation, consent, PIN, intro and session lookup complete end-to-end', async () => {
   const { db, request, activate } = fixture();
   assert.equal((await request('/api/card/lookup', { cardId })).body.status, 'unclaimed');

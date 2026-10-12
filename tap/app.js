@@ -552,7 +552,7 @@ function renderPassport(passport) {
   if (passport.legalAcceptanceRequired) {
     pendingLegalPassport = passport;
     showState("legal", "Confirmation required");
-    legalForm.querySelector("input").focus();
+    legalForm.querySelector("input").focus({ preventScroll: true });
     return;
   }
   pendingLegalPassport = null;
@@ -622,9 +622,10 @@ function showMemberIntro() {
   memberIntroEnter.textContent = "Enter";
   memberIntro.hidden = false;
   document.body.classList.add("member-intro-open");
+  startScreenAtTop(memberIntro, true);
   window.requestAnimationFrame(() => {
     memberIntro.classList.add("is-visible");
-    memberIntroEnter.focus();
+    memberIntroEnter.focus({ preventScroll: true });
   });
 }
 
@@ -645,6 +646,7 @@ async function completeMemberIntro() {
     window.setTimeout(() => {
       memberIntro.hidden = true;
       document.body.classList.remove("member-intro-open");
+      startScreenAtTop();
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 520);
   } catch (error) {
     memberIntroError.textContent = error.message;
@@ -976,7 +978,7 @@ function showDoorRoom() {
   document.querySelector("#door-status").textContent = currentDoorAccess.state === "open" ? "Clearance recognized" : "Clearance unknown";
   document.body.classList.add("door-room-open");
   doorRoom.hidden = false;
-  doorRoom.scrollIntoView({ block: "start" });
+  startScreenAtTop(doorRoom);
   document.querySelector("#door-return").focus({ preventScroll: true });
 }
 
@@ -986,11 +988,13 @@ function closeDoorRoom() {
   doorAttempts = 0;
   if (window.location.hash === "#the-door") window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
   innerCircleEntry.focus({ preventScroll: true });
+  startScreenAtTop();
 }
 
 function handleDoorRoute() {
-  if (window.location.hash === "#the-door" && currentDoorAccess) showDoorRoom();
-  else if (!doorRoom.hidden) closeDoorRoom();
+  if (window.location.hash === "#the-door" && currentDoorAccess) {
+    if (doorRoom.hidden) showDoorRoom();
+  } else if (!doorRoom.hidden) closeDoorRoom();
 }
 
 function tryDoor() {
@@ -1012,6 +1016,7 @@ function openWorkshop() {
   workshopRoom.hidden = false;
   document.querySelector("#workshop-level").textContent = currentWorkshop.level || "WORKSHOP I";
   renderWorkshopChallenges(currentWorkshop.challenges || []);
+  startScreenAtTop(doorRoom);
   workshopRoom.querySelector("h2").focus?.({ preventScroll: true });
 }
 
@@ -1128,7 +1133,7 @@ function openTechniqueLab() {
   techniqueLabSection.hidden = false;
   techniqueDiscovery.hidden = discovered;
   techniqueInterface.hidden = !discovered;
-  techniqueLabSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  startScreenAtTop(techniqueLabSection);
   if (isInstructor) loadInstructorConsole();
 }
 
@@ -1136,14 +1141,15 @@ function revealTechniqueInterface() {
   try { window.localStorage.setItem(`justbaila-technique-lab-discovered:v1:${cardId}`, "yes"); } catch {}
   techniqueDiscovery.hidden = true;
   techniqueInterface.hidden = false;
-  document.querySelector("#technique-lab-title").focus?.();
+  document.querySelector("#technique-lab-title").focus?.({ preventScroll: true });
+  startScreenAtTop(techniqueLabSection);
 }
 
 function closeTechniqueLab() {
   document.body.classList.remove("technique-lab-open");
   techniqueLabSection.hidden = true;
-  document.querySelector("#passport-state").scrollIntoView({ behavior: "smooth", block: "center" });
-  document.querySelector("#passport-monogram").focus();
+  document.querySelector("#passport-monogram").focus({ preventScroll: true });
+  startScreenAtTop();
 }
 
 function renderTechniqueLab(techniqueLab) {
@@ -1535,6 +1541,7 @@ function openArchive() {
   files.replaceChildren(...currentArchiveEntries.map(makeArchiveFile));
   archiveRoom.hidden = false;
   document.body.classList.add("archive-open");
+  startScreenAtTop(archiveRoom, true);
   document.querySelector("#archive-close").focus({ preventScroll: true });
 }
 
@@ -1732,6 +1739,7 @@ function renderClassifieds(classifieds) {
 function openClassifieds() {
   classifiedsSection.hidden = false;
   document.body.classList.add("classifieds-open");
+  startScreenAtTop(classifiedsSection, true);
   document.querySelector("#classifieds-close").focus({ preventScroll: true });
 }
 
@@ -2106,13 +2114,24 @@ function showKeyAward(transaction) {
   }, 5000);
 }
 
+function startScreenAtTop(screen = null, overlay = false) {
+  if (screen) {
+    screen.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    if (!overlay) screen.scrollIntoView({ behavior: "instant", block: "start" });
+  } else {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }
+}
+
 function showState(activeState, label) {
+  const enteringState = states[activeState]?.hidden;
   Object.entries(states).forEach(([name, element]) => { element.hidden = name !== activeState; });
   gatedContent.forEach((section) => { section.hidden = activeState !== "passport"; });
   updateHeroCopy(activeState);
   accessSeal.hidden = true;
   accessSeal.classList.remove("has-private-assignment");
   accessLabel.textContent = label;
+  if (enteringState) startScreenAtTop();
 }
 
 function updateHeroCopy(activeState) {

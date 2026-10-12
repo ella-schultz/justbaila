@@ -5,6 +5,7 @@ const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const LEGAL_VERSION = "2026-09-28";
 const MEMBER_PULSE_THRESHOLDS = Object.freeze({ newDays: 14, activeDays: 7, dormantDays: 45, movingHours: 48 });
 const ADMIN_READ_ROUTES = new Set([
+  "/api/admin/community-events/get",
   "/api/admin/passports/search", "/api/admin/activity", "/api/admin/passports/details",
   "/api/admin/missions/list", "/api/admin/events/list", "/api/admin/nfc/member",
   "/api/admin/social-checkin/get", "/api/admin/signals/visibility/get", "/api/admin/schedule/list",
@@ -138,6 +139,9 @@ export default {
       if (request.method === "GET" && url.pathname === "/api/public/schedule") {
         return await getPublicSchedule(env, cors);
       }
+      if (request.method === "GET" && url.pathname === "/api/public/community-events") {
+        return await getCommunityEvents(env, cors);
+      }
       if (request.method === "POST" && url.pathname.startsWith("/api/instructor/")) {
         await enforceRateLimit(request, env);
         const body = await readJson(request);
@@ -153,6 +157,8 @@ export default {
         await requireAdmin(request, env);
         if (!ADMIN_READ_ROUTES.has(url.pathname)) await auditSecurityEvent(env, "admin_write_requested", null, url.pathname, "authorized");
         const body = await readJson(request);
+        if (url.pathname === "/api/admin/community-events/get") return await getCommunityEvents(env, cors);
+        if (url.pathname === "/api/admin/community-events/update") return await updateCommunityEvents(body, env, cors);
         if (url.pathname === "/api/admin/passports/search") return await searchPassports(body.query, env, cors);
         if (url.pathname === "/api/admin/activity") return await listAdminActivity(env, cors);
         if (url.pathname === "/api/admin/passports/details") return await getAdminPassport(body.passportId, env, cors);
@@ -2500,6 +2506,45 @@ async function getAdminInvitation(env, cors) {
     buttonUrl: invitation.button_url || "",
     updatedAt: invitation.updated_at
   } }, 200, cors);
+}
+
+async function getCommunityEvents(env, cors) {
+  const settings = await env.DB.prepare("SELECT content_json, revision FROM community_event_settings WHERE id = 1").first();
+  if (!settings) throw new HttpError(404, "Community Events settings were not found.");
+  return json({ content: JSON.parse(settings.content_json), revision: settings.revision }, 200, cors);
+}
+
+async function updateCommunityEvents(body, env, cors) {
+  if (!Number.isSafeInteger(body.revision) || body.revision < 1) throw new HttpError(400, "Reload Community Events before saving.");
+  const content = {};
+  const fields = { kicker: 80, title: 120, description: 1600, nextTitle: 120, nextDescription: 2000, outreachTitle: 120, outreachDescription: 1000, buttonLabel: 80 };
+  for (const language of ["en", "es"]) {
+    content[language] = {};
+    for (const [field, maximum] of Object.entries(fields)) {
+      const value = body.content?.[language]?.[field];
+      if (typeof value !== "string") throw new HttpError(400, `Enter ${language.toUpperCase()} ${field}.`);
+      content[language][field] = normalizeMissionText(value, `${language.toUpperCase()} ${field}`, ["kicker", "title", "description"].includes(field) ? 1 : 0, maximum);
+    }
+    for (const prefix of ["next", "outreach"]) {
+      if (Boolean(content[language][`${prefix}Title`]) !== Boolean(content[language][`${prefix}Description`])) throw new HttpError(400, `Provide both ${language.toUpperCase()} ${prefix} heading and details, or leave both blank.`);
+    }
+  }
+  if (typeof body.content?.calendarUrl !== "string" || body.content.calendarUrl.length > 2000) throw new HttpError(400, "Enter a calendar link of at most 2000 characters.");
+  content.calendarUrl = body.content.calendarUrl.trim();
+  if (content.calendarUrl) {
+    let url;
+    try { url = new URL(content.calendarUrl); } catch { throw new HttpError(400, "Enter a complete HTTPS calendar link."); }
+    if (url.protocol !== "https:" || url.username || url.password) throw new HttpError(400, "The calendar link must use HTTPS without login credentials.");
+    content.calendarUrl = url.href;
+  }
+  if ((content.en.buttonLabel || content.es.buttonLabel) && !content.calendarUrl) throw new HttpError(400, "Add a calendar link or clear both button labels to hide the button.");
+  const updated = await env.DB.prepare(`
+    UPDATE community_event_settings SET content_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1 AND revision = ? RETURNING revision
+  `).bind(JSON.stringify(content), body.revision).first();
+  if (!updated) throw new HttpError(409, "Someone updated Community Events since you opened it. Copy your edits, reload the saved version, then try again.");
+  await auditSecurityEvent(env, "community_events_updated", null, "/api/admin/community-events/update", "completed", { revision: updated.revision });
+  return json({ content, revision: updated.revision }, 200, cors);
 }
 
 async function updateInvitation(body, env, cors) {
