@@ -21,6 +21,29 @@ function fixture(language = 'en') {
   return { context, node, content };
 }
 
+test('banner hooks retain date emphasis and safe rendering supports showing and hiding', () => {
+  for (const html of [english, spanish]) {
+    for (const field of ['kicker', 'title', 'date', 'details', 'linkLabel']) assert.equal(html.split(`data-banner-field="${field}"`).length - 1, 1);
+    assert.match(html, /<strong data-banner-field="date">/);
+  }
+  const { context, node } = fixture('es');
+  const hero = { hidden: false, querySelector: node };
+  context.document.querySelector = () => hero;
+  vm.runInContext(source.match(/function renderSpecialEventBanner\([^]*?\n\}/)[0], context);
+  context.banner = { visible: false };
+  vm.runInContext('renderSpecialEventBanner(banner)', context);
+  assert.equal(hero.hidden, true);
+  context.banner = { visible: true, linkUrl: '#events', es: { kicker: 'Evento', title: '<script>example</script>', date: 'Viernes', details: '7 PM', linkLabel: 'Más' } };
+  vm.runInContext('renderSpecialEventBanner(banner)', context);
+  assert.equal(hero.hidden, false);
+  assert.equal(node('[data-banner-field="title"]').textContent, '<script>example</script>');
+  assert.equal(node('[data-banner-field="details"]').textContent, ' · 7 PM');
+  assert.equal(node('.hero-event-link').href, '#events');
+  context.banner.es.linkLabel = '';
+  vm.runInContext('renderSpecialEventBanner(banner)', context);
+  assert.equal(node('.hero-event-link').hidden, true);
+});
+
 test('both main pages expose matching content hooks and retain static fallback text', () => {
   for (const html of [english, spanish]) {
     for (const field of fields) assert.equal(html.split(`data-community-field="${field}"`).length - 1, 1);

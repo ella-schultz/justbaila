@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261012-community-editor" />
+  <link rel="stylesheet" href="styles.css?v=20261012-event-banner" />
   <script src="schedule.js" defer></script>
-  <script src="community-events.js?v=20261012-community-editor" defer></script>
+  <script src="community-events.js?v=20261012-event-banner" defer></script>
   <link rel="alternate" hreflang="en" href="index.html" />
 </head>
 <body>
@@ -52,10 +52,10 @@
           Instrucción profesional de baile especializada en Salsa y Bachata, con clases privadas, clases grupales y entrenamiento en una variedad de estilos sociales, de salón e individuales para todos los niveles.
         </p>
         <aside class="hero-event" aria-labelledby="hero-event-title">
-          <p class="hero-event-kicker">Evento especial</p>
-          <h2 id="hero-event-title">Noche de baile latino en Uptown Lounge</h2>
-          <p><strong>11 de octubre de 2026</strong> · Clase a las 6:30 PM · Baile social de 7:30 PM a 10:00 PM</p>
-          <a href="#events" class="hero-event-link">Ver detalles del evento</a>
+          <p class="hero-event-kicker" data-banner-field="kicker">Evento especial</p>
+          <h2 id="hero-event-title" data-banner-field="title">Noche de baile latino en Uptown Lounge</h2>
+          <p><strong data-banner-field="date">11 de octubre de 2026</strong><span data-banner-field="details"> · Clase a las 6:30 PM · Baile social de 7:30 PM a 10:00 PM</span></p>
+          <a href="#events" class="hero-event-link" data-banner-field="linkLabel">Ver detalles del evento</a>
         </aside>
         <div class="hero-buttons">
           <a href="#booking" class="btn btn-primary">Reservar una clase</a>

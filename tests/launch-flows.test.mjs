@@ -104,6 +104,58 @@ test('Community Events optional blocks and calendar buttons can be cleared witho
   assert.equal(saved.calendarUrl, '');
 });
 
+test('special-event banner defaults preserve the existing hero and edits persist independently of community copy', async () => {
+  const { db, request } = fixture();
+  const body = (await request('/api/admin/community-events/get', {}, true)).body;
+  assert.equal(body.content.banner.en.date, 'October 11, 2026');
+  assert.equal(body.content.banner.es.title, 'Noche de baile latino en Uptown Lounge');
+  assert.equal(body.content.banner.visible, true);
+  assert.equal(JSON.parse(db.prepare('SELECT content_json FROM community_event_settings').get().content_json).banner, undefined);
+  const communityCopy = structuredClone(body.content.en);
+  body.content.banner.en.title = 'A new special event';
+  body.content.banner.es.title = 'Un nuevo evento especial';
+  body.content.banner.linkUrl = 'https://example.com/event';
+  assert.equal((await request('/api/admin/community-events/update', body)).status, 401);
+  assert.equal((await request('/api/admin/community-events/update', body, true)).status, 200);
+  const saved = (await request('/api/admin/community-events/get', {}, true)).body;
+  assert.equal(saved.content.banner.en.title, 'A new special event');
+  assert.deepEqual(saved.content.en, communityCopy);
+  saved.content.banner.visible = false;
+  assert.equal((await request('/api/admin/community-events/update', saved, true)).status, 200);
+  assert.equal((await request('/api/admin/community-events/get', {}, true)).body.content.banner.visible, false);
+});
+
+test('older Community Events editors preserve saved banner settings instead of resetting them', async () => {
+  const { request } = fixture();
+  const first = (await request('/api/admin/community-events/get', {}, true)).body;
+  first.content.banner.visible = false;
+  first.content.banner.en.title = 'Keep this banner';
+  assert.equal((await request('/api/admin/community-events/update', first, true)).status, 200);
+  const legacy = (await request('/api/admin/community-events/get', {}, true)).body;
+  delete legacy.content.banner;
+  legacy.content.en.nextTitle = 'Community edit';
+  assert.equal((await request('/api/admin/community-events/update', legacy, true)).status, 200);
+  const saved = (await request('/api/admin/community-events/get', {}, true)).body;
+  assert.equal(saved.content.banner.visible, false);
+  assert.equal(saved.content.banner.en.title, 'Keep this banner');
+});
+
+test('banner validation rejects unsafe links and incomplete visible content without saving', async () => {
+  const { request } = fixture();
+  const original = (await request('/api/admin/community-events/get', {}, true)).body;
+  for (const linkUrl of ['javascript:alert(1)', '//example.com', 'https://user:password@example.com', '#missing-section']) {
+    const body = structuredClone(original);
+    body.content.banner.linkUrl = linkUrl;
+    assert.equal((await request('/api/admin/community-events/update', body, true)).status, 400);
+  }
+  for (const change of [banner => { banner.es.title = ''; }, banner => { banner.visible = 'false'; }, banner => { banner.en.details = 'x'.repeat(801); }]) {
+    const body = structuredClone(original);
+    change(body.content.banner);
+    assert.equal((await request('/api/admin/community-events/update', body, true)).status, 400);
+  }
+  assert.equal((await request('/api/admin/community-events/get', {}, true)).body.revision, 1);
+});
+
 test('activation, consent, PIN, intro and session lookup complete end-to-end', async () => {
   const { db, request, activate } = fixture();
   assert.equal((await request('/api/card/lookup', { cardId })).body.status, 'unclaimed');

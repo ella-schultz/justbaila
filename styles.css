@@ -509,7 +509,7 @@ section {
   text-transform: uppercase;
 }
 
-#events [hidden] {
+#events [hidden], .hero-event[hidden], .hero-event [hidden] {
   display: none !important;
 }
 

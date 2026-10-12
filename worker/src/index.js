@@ -3,6 +3,12 @@ const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
 const RELAY_CODE_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const LEGAL_VERSION = "2026-09-28";
+const DEFAULT_SPECIAL_EVENT_BANNER = {
+  visible: true,
+  linkUrl: "#events",
+  en: { kicker: "Special Event", title: "Latin Dance Night at Uptown Lounge", date: "October 11, 2026", details: "Class at 6:30 PM · Social dancing from 7:30 PM to 10:00 PM", linkLabel: "See event details" },
+  es: { kicker: "Evento especial", title: "Noche de baile latino en Uptown Lounge", date: "11 de octubre de 2026", details: "Clase a las 6:30 PM · Baile social de 7:30 PM a 10:00 PM", linkLabel: "Ver detalles del evento" }
+};
 const MEMBER_PULSE_THRESHOLDS = Object.freeze({ newDays: 14, activeDays: 7, dormantDays: 45, movingHours: 48 });
 const ADMIN_READ_ROUTES = new Set([
   "/api/admin/community-events/get",
@@ -2511,7 +2517,32 @@ async function getAdminInvitation(env, cors) {
 async function getCommunityEvents(env, cors) {
   const settings = await env.DB.prepare("SELECT content_json, revision FROM community_event_settings WHERE id = 1").first();
   if (!settings) throw new HttpError(404, "Community Events settings were not found.");
-  return json({ content: JSON.parse(settings.content_json), revision: settings.revision }, 200, cors);
+  const content = JSON.parse(settings.content_json);
+  content.banner ||= structuredClone(DEFAULT_SPECIAL_EVENT_BANNER);
+  return json({ content, revision: settings.revision }, 200, cors);
+}
+
+function normalizeSpecialEventBanner(banner) {
+  if (!banner || typeof banner.visible !== "boolean") throw new HttpError(400, "Choose whether to show the special-event banner.");
+  const normalized = { visible: banner.visible, linkUrl: "" };
+  const fields = { kicker: 80, title: 160, date: 120, details: 800, linkLabel: 80 };
+  for (const language of ["en", "es"]) {
+    normalized[language] = {};
+    for (const [field, maximum] of Object.entries(fields)) {
+      if (typeof banner[language]?.[field] !== "string") throw new HttpError(400, `Enter ${language.toUpperCase()} banner ${field}.`);
+      normalized[language][field] = normalizeMissionText(banner[language][field], `${language.toUpperCase()} banner ${field}`, banner.visible && field !== "linkLabel" ? 1 : 0, maximum);
+    }
+  }
+  if (typeof banner.linkUrl !== "string" || banner.linkUrl.length > 2000) throw new HttpError(400, "Enter a banner link of at most 2000 characters.");
+  normalized.linkUrl = banner.linkUrl.trim();
+  if (normalized.linkUrl && normalized.linkUrl !== "#events") {
+    let url;
+    try { url = new URL(normalized.linkUrl); } catch { throw new HttpError(400, "Use #events or a complete HTTPS banner link."); }
+    if (url.protocol !== "https:" || url.username || url.password) throw new HttpError(400, "Use #events or an HTTPS banner link without login credentials.");
+    normalized.linkUrl = url.href;
+  }
+  if (banner.visible && (normalized.en.linkLabel || normalized.es.linkLabel) && !normalized.linkUrl) throw new HttpError(400, "Add a banner link or clear its button labels.");
+  return normalized;
 }
 
 async function updateCommunityEvents(body, env, cors) {
@@ -2538,6 +2569,12 @@ async function updateCommunityEvents(body, env, cors) {
     content.calendarUrl = url.href;
   }
   if ((content.en.buttonLabel || content.es.buttonLabel) && !content.calendarUrl) throw new HttpError(400, "Add a calendar link or clear both button labels to hide the button.");
+  if (body.content.banner === undefined) {
+    const existing = await env.DB.prepare("SELECT content_json FROM community_event_settings WHERE id = 1").first();
+    content.banner = JSON.parse(existing?.content_json || "{}").banner || structuredClone(DEFAULT_SPECIAL_EVENT_BANNER);
+  } else {
+    content.banner = normalizeSpecialEventBanner(body.content.banner);
+  }
   const updated = await env.DB.prepare(`
     UPDATE community_event_settings SET content_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
     WHERE id = 1 AND revision = ? RETURNING revision
