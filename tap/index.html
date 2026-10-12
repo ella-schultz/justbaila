@@ -15,7 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../after-dark.css" />
   <link rel="stylesheet" href="tap.css?v=20261011-activation-consent" />
-  <script src="app.js?v=20261011-launch-fixes" defer></script>
+  <script src="app.js?v=20261011-tap-checkin" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#member-content">Skip to the Underground</a>
@@ -218,22 +218,6 @@
       <div class="signals-container">
         <div class="signals-heading"><div><p class="section-kicker">Underground signals</p><h2 id="signals-title">Signals</h2></div></div>
         <div class="signals-grid" id="signals-grid"></div>
-      </div>
-    </section>
-
-    <section class="event-checkin gated-content" aria-labelledby="event-checkin-title" hidden>
-      <div class="event-checkin-card">
-        <div>
-          <p class="section-kicker">Social check-in</p>
-          <h2 id="event-checkin-title">Log tonight’s event.</h2>
-          <p>Enter the unique code shared at tonight’s social. Each event can be added once.</p>
-        </div>
-        <form id="event-checkin-form">
-          <label for="event-checkin-code">Event code</label>
-          <input id="event-checkin-code" name="checkInCode" minlength="4" maxlength="40" autocomplete="off" required />
-          <button class="member-button" type="submit">Check in</button>
-          <p class="form-message" id="event-checkin-message" aria-live="polite"></p>
-        </form>
       </div>
     </section>
 

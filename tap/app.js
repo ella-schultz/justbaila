@@ -111,8 +111,6 @@ const claimMessage = document.querySelector("#claim-message");
 const pinSetupForm = document.querySelector("#pin-setup-form");
 const pinForm = document.querySelector("#pin-form");
 const retryButton = document.querySelector("#retry-button");
-const eventCheckinForm = document.querySelector("#event-checkin-form");
-const eventCheckinSection = document.querySelector(".event-checkin");
 const signalsSection = document.querySelector(".signals-section");
 const milestoneClaimForm = document.querySelector("#milestone-claim-form");
 const techniqueLabSection = document.querySelector("#technique-lab");
@@ -161,7 +159,6 @@ pinSetupForm.addEventListener("submit", setupPin);
 pinForm.addEventListener("submit", unlockPin);
 document.querySelector("#pin-forgot").addEventListener("click", requestPinReset);
 retryButton.addEventListener("click", loadPassport);
-eventCheckinForm.addEventListener("submit", checkInEvent);
 milestoneClaimForm.addEventListener("submit", claimMilestone);
 document.querySelector("#passport-monogram").addEventListener("click", openTechniqueLab);
 memberIntroEnter.addEventListener("click", completeMemberIntro);
@@ -524,33 +521,6 @@ async function transitionToPassport(passport) {
   overlay.hidden = true;
 }
 
-async function checkInEvent(event) {
-  event.preventDefault();
-  const button = eventCheckinForm.querySelector("button[type='submit']");
-  const message = document.querySelector("#event-checkin-message");
-  const checkInCode = new FormData(eventCheckinForm).get("checkInCode")?.toString() || "";
-  button.disabled = true;
-  button.textContent = "Checking in…";
-  message.textContent = "";
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/events/check-in`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(memberPayload({ checkInCode }))
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "We couldn’t check you in.");
-    eventCheckinForm.reset();
-    renderPassport(result.passport);
-    message.textContent = `Checked in: ${result.eventTitle}`;
-  } catch (error) {
-    message.textContent = error.message;
-  } finally {
-    button.disabled = false;
-    button.textContent = "Check in";
-  }
-}
-
 async function claimMilestone(event) {
   event.preventDefault();
   const button = milestoneClaimForm.querySelector("button[type='submit']");
@@ -639,7 +609,6 @@ function renderPassport(passport) {
   accessSeal.href = "#private-assignment";
   accessSeal.classList.toggle("has-private-assignment", Boolean(privateAssignment));
   accessLabel.textContent = "Private assignment";
-  eventCheckinSection.hidden = !passport.socialCheckinVisible;
   signalsSection.hidden = !(passport.signalsVisible && (passport.signals || []).length > 0);
   if (previousLevel && previousLevel !== passport.undergroundLevel) showLevelUpdate(previousLevel, passport.undergroundLevel);
   else showKeyAward(passport.latestKeyTransaction);

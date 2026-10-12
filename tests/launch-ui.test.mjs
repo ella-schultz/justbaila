@@ -4,9 +4,16 @@ import { readFileSync, existsSync } from 'node:fs';
 import vm from 'node:vm';
 
 const member = readFileSync(new URL('../tap/app.js', import.meta.url), 'utf8');
+const memberHtml = readFileSync(new URL('../tap/index.html', import.meta.url), 'utf8');
 const adminPath = new URL('../admin-local/admin.js', import.meta.url);
 const admin = existsSync(adminPath) ? readFileSync(adminPath, 'utf8') : null;
 const deniedStorage = { getItem() { throw new Error('Storage blocked'); }, setItem() { throw new Error('Storage blocked'); } };
+
+test('member pages omit code check-in while retaining social presence', () => {
+  assert.doesNotMatch(memberHtml, /event-checkin|Log tonight’s event/);
+  assert.doesNotMatch(member, /eventCheckin|checkInEvent|\/api\/events\/check-in/);
+  assert.match(member, /socialPresence\.hidden = !passport\.socialCheckinVisible/);
+});
 
 test('member startup works when browser storage is blocked', () => {
   const context = vm.createContext({ window: { location: { search: '' }, localStorage: deniedStorage }, URLSearchParams });
